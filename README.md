@@ -60,10 +60,5 @@ A comprehensive Bangladesh Income Tax Calculation, Return Filing, and Administra
    npm run dev
    ```
 
-## Default Accounts
-- **Admin**: `rafy@gmail.com` (Password: `111222`)
-- **Taxpayer**: `shimul@gmail.com` (Password: `111222`)
 
-## License
-MIT
 

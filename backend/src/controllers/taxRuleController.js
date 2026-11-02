@@ -343,7 +343,63 @@ const TaxRuleController = {
       });
     }
   },
+  // get rule by id
+  async getTaxRuleById(req, res) {
+    try {
+      const { id } = req.params;
+      const rule = await TaxRuleService.getTaxRuleById(id);
+      return res.status(200).json({
+        success: true,
+        data: rule,
+      });
+    } catch (error) {
+      console.error('Get Tax Rule By ID Error:', error);
+      return res.status(error.message === 'Tax rule not found.' ? 404 : 400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  },
+
+  // toggle single rule status
+  async toggleStatus(req, res) {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      const result = await TaxRuleService.toggleRuleStatus(id, status);
+      return res.status(200).json({
+        success: true,
+        message: `Tax rule status updated to ${status}`,
+        data: result,
+      });
+    } catch (error) {
+      console.error('Toggle Tax Rule Status Error:', error);
+      return res.status(error.message === 'Tax rule not found.' ? 404 : 400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  },
+
+  // delete tax rule
+  async deleteTaxRule(req, res) {
+    try {
+      const { id } = req.params;
+      const result = await TaxRuleService.deleteTaxRule(id);
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+        action: result.action,
+        data: { id: result.id },
+      });
+    } catch (error) {
+      console.error('Delete Tax Rule Error:', error);
+      return res.status(error.message === 'Tax rule not found.' ? 404 : 400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  },
 };
 
-module.exports =
-  TaxRuleController;
+module.exports = TaxRuleController;

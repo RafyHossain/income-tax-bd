@@ -29,6 +29,25 @@ const TaxCalculationController = {
 
       // validation / client errors
 
+      if (
+        error.code === "FILING_HISTORY_UNAVAILABLE" ||
+        error.code === "MISSING_AREA" ||
+        error.code === "INACTIVE_RULE" ||
+        error.code === "EXPIRED_RULE" ||
+        error.code === "CONFLICTING_RULES" ||
+        error.code === "RULE_NOT_FOUND" ||
+        error.message.startsWith("Minimum tax rule") ||
+        error.message.startsWith("Return filing history") ||
+        error.message.startsWith("Taxpayer minimum tax area")
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: error.code || "MINIMUM_TAX_ERROR",
+          message: error.message,
+          classificationStatus: error.classificationStatus || null,
+        });
+      }
+
       const clientErrorMessages = [
 
         "Tax year is required",

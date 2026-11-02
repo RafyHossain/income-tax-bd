@@ -1,3 +1,4 @@
+const db = require("../database/query");
 const SurchargeRuleModel = require("../models/surchargeRuleModel");
 
 const SurchargeRuleController = {
@@ -152,13 +153,36 @@ const SurchargeRuleController = {
     }
   },
 
-  // admin: delete rule
+  // admin: delete rule with historical protection
   async deleteRule(req, res) {
     try {
-      await SurchargeRuleModel.deleteRule(req.params.id);
+      const { id } = req.params;
+      const existing = await SurchargeRuleModel.getRuleById(id);
+      if (!existing) {
+        return res.status(404).json({
+          success: false,
+          message: "Surcharge rule not found.",
+        });
+      }
+      const refCount = await db.query(
+        'SELECT COUNT(*) as count FROM tax_calculations WHERE tax_year = ? AND surcharge_amount > 0',
+        [existing.tax_year]
+      );
+      if (Number(refCount[0]?.count || 0) > 0) {
+        await SurchargeRuleModel.toggleStatus(id, 'INACTIVE');
+        return res.status(200).json({
+          success: true,
+          action: "DEACTIVATED",
+          message: "Surcharge rule is referenced in historical calculations with surcharge liability. It has been deactivated (status set to INACTIVE).",
+          data: { id, status: "INACTIVE" },
+        });
+      }
+      await SurchargeRuleModel.deleteRule(id);
       return res.status(200).json({
         success: true,
+        action: "DELETED",
         message: "Surcharge rule deleted successfully.",
+        data: { id },
       });
     } catch (error) {
       console.error("Delete surcharge rule error:", error);

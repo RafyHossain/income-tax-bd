@@ -39,6 +39,8 @@ const UserDropdown = () => {
     navigate("/", { replace: true });
   };
 
+  const isAdmin = user?.role?.toLowerCase() === "admin";
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -97,27 +99,29 @@ const UserDropdown = () => {
 
         <DropdownMenuSeparator />
 
-        {/* Dashboard */}
+        {/* Dashboard / Console */}
         <DropdownMenuItem asChild>
           <Link
-            to="/dashboard"
+            to={isAdmin ? "/admin" : "/dashboard"}
             className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm"
           >
             <LayoutDashboard className="h-4 w-4 text-slate-500" />
-            <span>Dashboard</span>
+            <span>{isAdmin ? "Admin Console" : "Dashboard"}</span>
           </Link>
         </DropdownMenuItem>
 
-        {/* Profile */}
-        <DropdownMenuItem asChild>
-          <Link
-            to="/dashboard/profile"
-            className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm"
-          >
-            <User className="h-4 w-4 text-slate-500" />
-            <span>Profile</span>
-          </Link>
-        </DropdownMenuItem>
+        {/* Profile (Only for taxpayer users) */}
+        {!isAdmin && (
+          <DropdownMenuItem asChild>
+            <Link
+              to="/dashboard/profile"
+              className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm"
+            >
+              <User className="h-4 w-4 text-slate-500" />
+              <span>Profile</span>
+            </Link>
+          </DropdownMenuItem>
+        )}
 
         <DropdownMenuSeparator />
 

@@ -6,11 +6,14 @@ import {
   Pencil,
   X,
   Power,
+  Trash2,
 } from "lucide-react";
 
 import toast from "react-hot-toast";
 
 import TaxRuleService from "@/services/taxRuleService";
+import ConfirmDialog from "@/components/admin/ConfirmDialog";
+import { formatTaxYearLabel } from "@/utils/taxYearUtils";
 
 const emptyForm = {
   tax_year: "",
@@ -18,6 +21,7 @@ const emptyForm = {
   maximum_income: "",
   tax_rate: "",
   fixed_amount: "0",
+  status: "ACTIVE",
   effective_from: "",
   effective_to: "",
 };
@@ -57,8 +61,52 @@ const AdminTaxRules = () => {
   const [form, setForm] =
     useState(emptyForm);
 
-  const [creatingNewTaxYear, setCreatingNewTaxYear] =
-    useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+
+  const handleToggleRuleStatus = (rule) => {
+    const nextStatus = rule.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+    setConfirmDialog({
+      title: nextStatus === "ACTIVE" ? "Activate Tax Slab" : "Deactivate Tax Slab",
+      message: `Are you sure you want to mark this tax slab (${Number(rule.tax_rate).toFixed(2)}%) as ${nextStatus}?`,
+      variant: nextStatus === "ACTIVE" ? "primary" : "warning",
+      confirmText: nextStatus === "ACTIVE" ? "Activate Slab" : "Deactivate Slab",
+      onConfirm: async () => {
+        try {
+          const res = await TaxRuleService.toggleStatus(rule.id, nextStatus);
+          toast.success(res?.message || `Tax slab marked as ${nextStatus}.`);
+          setConfirmDialog(null);
+          await loadRules(selectedTaxYear);
+          await loadTaxYearStatus(selectedTaxYear);
+        } catch (err) {
+          console.error(err);
+          toast.error(err?.response?.data?.message || err?.message || "Failed to update tax slab status.");
+          setConfirmDialog(null);
+        }
+      },
+    });
+  };
+
+  const handleDeleteRule = (rule) => {
+    setConfirmDialog({
+      title: "Delete Tax Slab",
+      message: `Are you sure you want to permanently delete this tax slab (${Number(rule.tax_rate).toFixed(2)}% on BDT ${formatMoney(rule.minimum_income)} - ${rule.maximum_income ? `BDT ${formatMoney(rule.maximum_income)}` : "Above"})? This action cannot be undone.`,
+      variant: "danger",
+      confirmText: "Delete Slab",
+      onConfirm: async () => {
+        try {
+          const res = await TaxRuleService.deleteTaxRule(rule.id);
+          toast.success(res?.message || "Tax slab deleted successfully.");
+          setConfirmDialog(null);
+          await loadRules(selectedTaxYear);
+          await loadTaxYearStatus(selectedTaxYear);
+        } catch (err) {
+          console.error(err);
+          toast.error(err?.response?.data?.message || err?.message || "Failed to delete tax slab.");
+          setConfirmDialog(null);
+        }
+      },
+    });
+  };
 
   // load tax years
 
@@ -290,26 +338,10 @@ const AdminTaxRules = () => {
 
   const handleCreate = () => {
     setEditingRule(null);
-    setCreatingNewTaxYear(false);
 
     setForm({
       ...emptyForm,
-      tax_year: selectedTaxYear,
-    });
-
-    setShowForm(true);
-  };
-
-  // open new tax year form
-
-  const handleCreateTaxYear = () => {
-    setEditingRule(null);
-    setCreatingNewTaxYear(true);
-
-    setForm({
-      ...emptyForm,
-      tax_year: "",
-      fixed_amount: "0",
+      tax_year: selectedTaxYear || (taxYears[0] || ""),
     });
 
     setShowForm(true);
@@ -319,7 +351,6 @@ const AdminTaxRules = () => {
 
   const handleEdit = (rule) => {
     setEditingRule(rule);
-    setCreatingNewTaxYear(false);
 
     setForm({
       tax_year: rule.tax_year || "",
@@ -335,6 +366,9 @@ const AdminTaxRules = () => {
 
       fixed_amount:
         rule.fixed_amount ?? "0",
+
+      status:
+        rule.status || "ACTIVE",
 
       effective_from:
         rule.effective_from
@@ -365,7 +399,6 @@ const AdminTaxRules = () => {
 
     setShowForm(false);
     setEditingRule(null);
-    setCreatingNewTaxYear(false);
     setForm(emptyForm);
   };
 
@@ -373,28 +406,6 @@ const AdminTaxRules = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-
-    // new tax year validation
-
-    if (creatingNewTaxYear) {
-      const taxYearPattern = /^\d{4}-\d{2}$/;
-
-      if (!taxYearPattern.test(form.tax_year)) {
-        toast.error(
-          "Tax year must be in YYYY-YY format.",
-        );
-
-        return;
-      }
-
-      if (taxYears.includes(form.tax_year)) {
-        toast.error(
-          "This tax year already exists.",
-        );
-
-        return;
-      }
-    }
 
     try {
       setSaving(true);
@@ -417,6 +428,9 @@ const AdminTaxRules = () => {
           form.fixed_amount === ""
             ? 0
             : Number(form.fixed_amount),
+
+        status:
+          form.status || "ACTIVE",
 
         effective_from:
           form.effective_from,
@@ -441,20 +455,13 @@ const AdminTaxRules = () => {
           payload,
         );
 
-        if (creatingNewTaxYear) {
-          toast.success(
-            `${payload.tax_year} tax year created successfully.`,
-          );
-        } else {
-          toast.success(
-            "Tax rule created successfully.",
-          );
-        }
+        toast.success(
+          "Tax rule created successfully.",
+        );
       }
 
       setShowForm(false);
       setEditingRule(null);
-      setCreatingNewTaxYear(false);
       setForm(emptyForm);
 
       await loadTaxYears();
@@ -487,80 +494,70 @@ const AdminTaxRules = () => {
   };
 
   // change tax year status
-
-  const handleTaxYearStatusChange =
-    async () => {
-      if (!selectedTaxYear) {
-        return;
-      }
-
-      const nextStatus =
-        taxYearStatus === "ACTIVE"
-          ? "INACTIVE"
-          : "ACTIVE";
-
-      const action =
-        nextStatus === "ACTIVE"
-          ? "activate"
-          : "deactivate";
-
-      const confirmed = window.confirm(
-        `Are you sure you want to ${action} the entire ${selectedTaxYear} tax year?`,
-      );
-
-      if (!confirmed) {
-        return;
-      }
-
-      try {
-        setStatusUpdating(true);
-
-        await TaxRuleService.updateTaxYearStatus(
-          selectedTaxYear,
-          nextStatus,
-        );
-
-        setTaxYearStatus(nextStatus);
-
-        toast.success(
-          `Tax year ${selectedTaxYear} ${action}d successfully.`,
-        );
-
-        await loadRules(
-          selectedTaxYear,
-        );
-
-        await loadTaxYearStatus(
-          selectedTaxYear,
-        );
-      } catch (error) {
-        console.error(
-          "Tax year status update error:",
-          error,
-        );
-
-        toast.error(
-          error?.response?.data?.message ||
-            error?.message ||
-            "Failed to update tax year status.",
-        );
-      } finally {
-        setStatusUpdating(false);
-      }
-    };
-
-  // refresh current tax year
-
-  const handleRefresh = async () => {
+  const handleTaxYearStatusChange = () => {
     if (!selectedTaxYear) {
       return;
     }
 
-    await Promise.all([
-      loadRules(selectedTaxYear),
-      loadTaxYearStatus(selectedTaxYear),
-    ]);
+    const nextStatus =
+      taxYearStatus === "ACTIVE"
+        ? "INACTIVE"
+        : "ACTIVE";
+
+    const action =
+      nextStatus === "ACTIVE"
+        ? "activate"
+        : "deactivate";
+
+    setConfirmDialog({
+      title: `${nextStatus === "ACTIVE" ? "Activate" : "Deactivate"} Assessment Year Slabs`,
+      message: `Are you sure you want to ${action} all tax slabs for Assessment Year ${selectedTaxYear}?`,
+      variant: nextStatus === "ACTIVE" ? "primary" : "warning",
+      confirmText: nextStatus === "ACTIVE" ? "Activate All" : "Deactivate All",
+      onConfirm: async () => {
+        try {
+          setStatusUpdating(true);
+
+          await TaxRuleService.updateTaxYearStatus(
+            selectedTaxYear,
+            nextStatus,
+          );
+
+          setTaxYearStatus(nextStatus);
+
+          toast.success(
+            `All slabs for ${selectedTaxYear} ${action}d successfully.`,
+          );
+
+          setConfirmDialog(null);
+
+          await loadRules(
+            selectedTaxYear,
+          );
+
+          await loadTaxYearStatus(
+            selectedTaxYear,
+          );
+        } catch (error) {
+          console.error(
+            "Tax year status update error:",
+            error,
+          );
+
+          toast.error(
+            error?.response?.data?.message ||
+              error?.message ||
+              "Failed to update tax year status.",
+          );
+
+          setConfirmDialog(null);
+        } finally {
+          setStatusUpdating(false);
+        }
+      },
+    });
   };
+
 
   // format money
 
@@ -600,13 +597,13 @@ const AdminTaxRules = () => {
   // main ui
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
 
       {/* =====================================================
           HEADER
       ====================================================== */}
 
-      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-lg shadow-emerald-600/20">
@@ -619,156 +616,76 @@ const AdminTaxRules = () => {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-3">
-
-          {/* REFRESH */}
-
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={
-              loadingRules ||
-              loadingStatus
-            }
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <RefreshCw
-              className={`h-4 w-4 ${
-                loadingRules ||
-                loadingStatus
-                  ? "animate-spin"
-                  : ""
-              }`}
-            />
-
-            Refresh
-          </button>
-
-          {/* NEW TAX YEAR */}
-
-          <button
-            type="button"
-            onClick={handleCreateTaxYear}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
-          >
-            <Plus className="h-4 w-4" />
-
-            New Tax Year
-          </button>
-
-          {/* ADD TAX RULE */}
-
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={handleCreate}
             disabled={!selectedTaxYear}
-            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="h-4 w-4" />
-
             Add Tax Rule
           </button>
-
         </div>
       </div>
 
       {/* =====================================================
-          TAX YEAR SELECTOR + STATUS
+          TAX YEAR SELECTOR + STATUS TOOLBAR
       ====================================================== */}
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-
-          <div className="flex-1">
-
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="w-full sm:w-64">
             <label
               htmlFor="taxYear"
-              className="block text-sm font-medium text-slate-700"
+              className="text-xs font-medium text-slate-600 block"
             >
               Tax Year
             </label>
-
-            <p className="mt-1 text-xs text-slate-400">
-              Select the tax year whose rules you want
-              to manage.
-            </p>
-
             <select
               id="taxYear"
               value={selectedTaxYear}
               onChange={(event) =>
-                setSelectedTaxYear(
-                  event.target.value,
-                )
+                setSelectedTaxYear(event.target.value)
               }
-              className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none transition focus:border-slate-400 md:w-64"
+              className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
             >
               {taxYears.map((year) => (
-                <option
-                  key={year}
-                  value={year}
-                >
-                  {year}
+                <option key={year} value={year}>
+                  {formatTaxYearLabel(year)}
                 </option>
               ))}
             </select>
-
           </div>
 
-          {/* TAX YEAR STATUS */}
-
-          <div className="flex items-center gap-4">
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Tax Year Status
-              </p>
-
-              <div className="mt-2 flex items-center gap-2">
-
-                <span
-                  className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-                    taxYearStatus === "ACTIVE"
-                      ? "bg-green-100 text-green-700"
-                      : "bg-red-100 text-red-700"
-                  }`}
-                >
-                  {loadingStatus
-                    ? "Loading..."
-                    : taxYearStatus}
-                </span>
-
-              </div>
-            </div>
+          <div className="flex items-center gap-3">
+            <span
+              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                taxYearStatus === "ACTIVE"
+                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                  : "bg-slate-100 text-slate-600 border border-slate-200"
+              }`}
+            >
+              Year Status: {taxYearStatus}
+            </span>
 
             <button
               type="button"
-              onClick={
-                handleTaxYearStatusChange
-              }
-              disabled={
-                statusUpdating ||
-                loadingStatus ||
-                !selectedTaxYear
-              }
-              className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
+              onClick={handleTaxYearStatusChange}
+              disabled={statusUpdating || loadingStatus || !selectedTaxYear}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
                 taxYearStatus === "ACTIVE"
                   ? "border-red-200 bg-white text-red-600 hover:bg-red-50"
-                  : "border-green-200 bg-white text-green-600 hover:bg-green-50"
+                  : "border-emerald-200 bg-white text-emerald-600 hover:bg-emerald-50"
               }`}
             >
               {statusUpdating ? (
-                <RefreshCw className="h-4 w-4 animate-spin" />
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                <Power className="h-4 w-4" />
+                <Power className="h-3.5 w-3.5" />
               )}
-
-              {taxYearStatus === "ACTIVE"
-                ? "Deactivate Year"
-                : "Activate Year"}
+              {taxYearStatus === "ACTIVE" ? "Deactivate Year" : "Activate Year"}
             </button>
-
           </div>
         </div>
       </div>
@@ -778,10 +695,8 @@ const AdminTaxRules = () => {
       ====================================================== */}
 
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-4">
-          <p className="text-sm font-medium text-red-700">
-            {error}
-          </p>
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {error}
         </div>
       )}
 
@@ -789,188 +704,102 @@ const AdminTaxRules = () => {
           RULE TABLE
       ====================================================== */}
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-
-        {/* TABLE HEADER */}
-
-        <div className="border-b border-slate-200 px-6 py-5">
-
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-
-            <div className="flex items-center gap-3">
-
-              <div className="rounded-xl bg-slate-100 p-3">
-                <Calculator className="h-5 w-5 text-slate-700" />
-              </div>
-
-              <div>
-
-                <h2 className="text-lg font-semibold text-slate-900">
-                  Tax Slabs
-                </h2>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  {selectedTaxYear ||
-                    "No tax year selected"}
-                </p>
-
-              </div>
-            </div>
-
-            {/* STATUS BADGE */}
-
-            <span
-              className={`inline-flex w-fit items-center rounded-full px-3 py-1.5 text-xs font-semibold ${
-                taxYearStatus === "ACTIVE"
-                  ? "bg-green-100 text-green-700"
-                  : "bg-red-100 text-red-700"
-              }`}
-            >
-              {taxYearStatus === "ACTIVE"
-                ? "Active Tax Year"
-                : "Inactive Tax Year"}
-            </span>
-
-          </div>
-        </div>
-
-        {/* TABLE */}
-
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         {loadingRules ? (
-          <div className="flex min-h-[250px] items-center justify-center">
-            <RefreshCw className="h-6 w-6 animate-spin text-slate-400" />
+          <div className="py-12 text-center text-slate-500">
+            <RefreshCw className="mx-auto h-6 w-6 animate-spin text-slate-400" />
+            <p className="mt-2 text-sm">Loading tax slabs...</p>
           </div>
         ) : rules.length === 0 ? (
-          <div className="px-6 py-16 text-center">
-
-            <Calculator className="mx-auto h-10 w-10 text-slate-300" />
-
-            <p className="mt-3 text-slate-500">
-              No tax rules found for this tax year.
-            </p>
-
+          <div className="py-12 text-center text-slate-500">
+            <Calculator className="mx-auto h-8 w-8 text-slate-300" />
+            <p className="mt-2 text-sm font-medium text-slate-700">No tax rules found for this tax year</p>
+            <p className="text-xs text-slate-400">Click &ldquo;Add Tax Rule&rdquo; to create a new progressive slab.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-
-            <table className="min-w-full">
-
-              <thead className="border-b border-slate-200 bg-slate-50">
-
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase font-semibold text-slate-600">
                 <tr>
-
-                  <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    #
-                  </th>
-
-                  <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Minimum Income
-                  </th>
-
-                  <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Maximum Income
-                  </th>
-
-                  <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Tax Rate
-                  </th>
-
-                  <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Fixed Amount
-                  </th>
-
-                  <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Effective From
-                  </th>
-
-                  <th className="px-5 py-4 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Action
-                  </th>
-
+                  <th className="px-4 py-3">#</th>
+                  <th className="px-4 py-3">Minimum Income</th>
+                  <th className="px-4 py-3">Maximum Income</th>
+                  <th className="px-4 py-3 text-right">Tax Rate</th>
+                  <th className="px-4 py-3 text-right">Fixed Amount</th>
+                  <th className="px-4 py-3 text-center">Effective From</th>
+                  <th className="px-4 py-3 text-center">Status</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
-
               </thead>
-
               <tbody className="divide-y divide-slate-100">
-
-                {rules.map(
-                  (rule, index) => (
-                    <tr
-                      key={rule.id}
-                      className="transition hover:bg-slate-50"
-                    >
-
-                      <td className="px-5 py-4 text-sm text-slate-500">
-                        {index + 1}
-                      </td>
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm font-semibold text-slate-900">
-                        BDT{" "}
-                        {formatMoney(
-                          rule.minimum_income,
-                        )}
-                      </td>
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm font-semibold text-slate-900">
-                        {rule.maximum_income ===
-                        null
-                          ? "Above"
-                          : `BDT ${formatMoney(
-                              rule.maximum_income,
-                            )}`}
-                      </td>
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm font-semibold text-slate-900">
-                        {Number(
-                          rule.tax_rate,
-                        ).toFixed(2)}
-                        %
-                      </td>
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm font-semibold text-slate-900">
-                        BDT{" "}
-                        {formatMoney(
-                          rule.fixed_amount,
-                        )}
-                      </td>
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">
-                        {rule.effective_from
-                          ? String(
-                              rule.effective_from,
-                            ).slice(
-                              0,
-                              10,
-                            )
-                          : "—"}
-                      </td>
-
-                      <td className="px-5 py-4">
-
-                        <div className="flex justify-end">
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleEdit(
-                                rule,
-                              )
-                            }
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-
-                            Edit
-                          </button>
-
-                        </div>
-
-                      </td>
-
-                    </tr>
-                  ),
-                )}
-
+                {rules.map((rule, index) => (
+                  <tr key={rule.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="px-4 py-3 text-slate-500">{index + 1}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-900">
+                      BDT{" "}
+                      {formatMoney(
+                        index > 0 && Number(rule.minimum_income) > 0 && Number(rule.minimum_income) % 1000 === 0
+                          ? Number(rule.minimum_income) + 1
+                          : rule.minimum_income,
+                      )}
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-slate-900">
+                      {rule.maximum_income === null ? "Above" : `BDT ${formatMoney(rule.maximum_income)}`}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                      {Number(rule.tax_rate).toFixed(2)}%
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                      BDT {formatMoney(rule.fixed_amount)}
+                    </td>
+                    <td className="px-4 py-3 text-center text-xs text-slate-500">
+                      {rule.effective_from ? String(rule.effective_from).slice(0, 10) : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                          rule.status === "ACTIVE"
+                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            : "bg-slate-100 text-slate-600 border border-slate-200"
+                        }`}
+                      >
+                        {rule.status === "ACTIVE" ? "ACTIVE" : "INACTIVE"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleRuleStatus(rule)}
+                          title={rule.status === "ACTIVE" ? "Deactivate Slab" : "Activate Slab"}
+                          className={`rounded p-1.5 transition ${
+                            rule.status === "ACTIVE"
+                              ? "text-emerald-600 hover:bg-emerald-50"
+                              : "text-slate-400 hover:bg-slate-100"
+                          }`}
+                        >
+                          <Power className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(rule)}
+                          title="Edit Slab"
+                          className="rounded p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteRule(rule)}
+                          title="Delete Slab"
+                          className="rounded p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700 transition"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
 
             </table>
@@ -978,7 +807,7 @@ const AdminTaxRules = () => {
           </div>
         )}
 
-      </section>
+      </div>
 
       {/* =====================================================
           CREATE / EDIT MODAL
@@ -999,8 +828,6 @@ const AdminTaxRules = () => {
 
                   {editingRule
                     ? "Edit Tax Rule"
-                    : creatingNewTaxYear
-                    ? "Create New Tax Year"
                     : "Add Tax Rule"}
 
                 </h2>
@@ -1009,8 +836,6 @@ const AdminTaxRules = () => {
 
                   {editingRule
                     ? "Update the selected tax slab."
-                    : creatingNewTaxYear
-                    ? "Create a new tax year with its first tax slab."
                     : "Configure a new tax slab for the selected tax year."}
 
                 </p>
@@ -1047,45 +872,25 @@ const AdminTaxRules = () => {
                     Tax Year
                   </label>
 
-                  {creatingNewTaxYear ? (
-                    <>
-                      <input
-                        id="form-tax-year"
-                        name="tax_year"
-                        type="text"
-                        value={form.tax_year}
-                        onChange={handleChange}
-                        required
-                        placeholder="2027-28"
-                        className="w-full rounded-lg border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-slate-400"
-                      />
-
-                      <p className="mt-1 text-xs text-slate-400">
-                        Format: YYYY-YY, for example
-                        2027-28.
-                      </p>
-                    </>
-                  ) : (
-                    <select
-                      id="form-tax-year"
-                      name="tax_year"
-                      value={form.tax_year}
-                      onChange={handleChange}
-                      required
-                      className="w-full rounded-lg border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-slate-400"
-                    >
-                      {taxYears.map(
-                        (year) => (
-                          <option
-                            key={year}
-                            value={year}
-                          >
-                            {year}
-                          </option>
-                        ),
-                      )}
-                    </select>
-                  )}
+                  <select
+                    id="form-tax-year"
+                    name="tax_year"
+                    value={form.tax_year}
+                    onChange={handleChange}
+                    required
+                    className="w-full rounded-lg border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-slate-400"
+                  >
+                    {taxYears.map(
+                      (year) => (
+                        <option
+                          key={year}
+                          value={year}
+                        >
+                          {formatTaxYearLabel(year)}
+                        </option>
+                      ),
+                    )}
+                  </select>
 
                 </div>
 
@@ -1256,27 +1061,35 @@ const AdminTaxRules = () => {
 
                 </div>
 
-              </div>
+                {/* STATUS */}
 
-              {/* NEW TAX YEAR INFO */}
+                <div>
 
-              {creatingNewTaxYear && (
-                <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+                  <label
+                    htmlFor="form-status"
+                    className="mb-2 block text-sm font-medium text-slate-700"
+                  >
+                    Status
+                  </label>
 
-                  <p className="text-sm font-medium text-blue-800">
-                    New Tax Year
-                  </p>
+                  <select
+                    id="form-status"
+                    name="status"
+                    value={form.status || "ACTIVE"}
+                    onChange={handleChange}
+                    className="w-full rounded-lg border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-slate-400"
+                  >
+                    <option value="ACTIVE">Active</option>
+                    <option value="INACTIVE">Inactive</option>
+                  </select>
 
-                  <p className="mt-1 text-xs leading-5 text-blue-700">
-                    This will create the first tax slab
-                    for the new tax year. The new tax
-                    year will remain inactive until all
-                    required slabs are added and the year
-                    is activated.
+                  <p className="mt-1 text-xs text-slate-400">
+                    Inactive slabs are excluded from new calculations.
                   </p>
 
                 </div>
-              )}
+
+              </div>
 
               {/* BUTTONS */}
 
@@ -1303,8 +1116,6 @@ const AdminTaxRules = () => {
 
                   {editingRule
                     ? "Update Rule"
-                    : creatingNewTaxYear
-                    ? "Create Tax Year"
                     : "Create Rule"}
 
                 </button>
@@ -1317,6 +1128,19 @@ const AdminTaxRules = () => {
 
         </div>
       )}
+
+      {/* =====================================================
+          CONFIRMATION DIALOG MODAL
+      ====================================================== */}
+      <ConfirmDialog
+        isOpen={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        variant={confirmDialog?.variant}
+        confirmText={confirmDialog?.confirmText}
+        onConfirm={confirmDialog?.onConfirm}
+        onClose={() => setConfirmDialog(null)}
+      />
 
     </div>
   );

@@ -244,17 +244,17 @@ const YearwiseTaxRules = () => {
 
                               <td className="px-5 py-3.5 font-medium text-slate-800 whitespace-nowrap">
                                 {index === 0 ? (
-                                  <span>First {formatBDT(max)}</span>
+                                  <span>First {formatBDT(max)} (Tax-Free)</span>
                                 ) : max !== null ? (
                                   <span>
                                     Next {formatBDT(span)}{" "}
                                     <span className="text-xs text-slate-400 font-normal">
-                                      ({formatBDT(min)} to {formatBDT(max)})
+                                      ({formatBDT(min % 1000 === 0 ? min + 1 : min)} to {formatBDT(max)})
                                     </span>
                                   </span>
                                 ) : (
                                   <span>
-                                    Remaining Income Above {formatBDT(min)}
+                                    Remaining Income Above {formatBDT(min % 1000 === 0 ? min + 1 : min)}
                                   </span>
                                 )}
                               </td>

@@ -16,8 +16,16 @@ const TaxpayerProfileService = {
       throw new Error("Taxpayer profile already exists");
     }
 
+    if (profileData.tin_number) {
+      const duplicateTin = await TaxpayerProfileModel.findByTin(profileData.tin_number);
+      if (duplicateTin) {
+        throw new Error("This e-TIN number is already registered.");
+      }
+    }
+
     return await TaxpayerProfileModel.createProfile({
       user_id: userId,
+      tin_number: profileData.tin_number || null,
       date_of_birth: profileData.date_of_birth,
       gender: profileData.gender,
       minimum_tax_area: profileData.minimum_tax_area,
@@ -64,6 +72,13 @@ const TaxpayerProfileService = {
       throw new Error("Taxpayer profile not found");
     }
 
+    if (profileData.tin_number) {
+      const duplicateTin = await TaxpayerProfileModel.findByTinExcludeUser(profileData.tin_number, userId);
+      if (duplicateTin) {
+        throw new Error("This e-TIN number is already registered.");
+      }
+    }
+
     return await TaxpayerProfileModel.updateProfile(userId, profileData);
   },
 
@@ -73,6 +88,14 @@ const TaxpayerProfileService = {
       throw new Error("Profile data is required");
     }
 
+    let tinNumber = undefined;
+    if (data.tin_number !== undefined && data.tin_number !== null && String(data.tin_number).trim() !== "") {
+      tinNumber = String(data.tin_number).trim();
+      const tinRegex = /^[0-9]{12}$/;
+      if (!tinRegex.test(tinNumber)) {
+        throw new Error("e-TIN must contain exactly 12 digits.");
+      }
+    }
 
     if (
       data.date_of_birth === undefined ||
@@ -162,8 +185,6 @@ const TaxpayerProfileService = {
       );
     }
 
-    // database driven
-
     // database driven area check with graceful fallback
     const minimumTaxArea =
       data.minimum_tax_area === undefined ||
@@ -236,33 +257,36 @@ const TaxpayerProfileService = {
 
     // tax credits: TDS & Advance Tax
     const tdsAmount =
-      data.tds_amount === undefined ||
-      data.tds_amount === null ||
-      data.tds_amount === ""
-        ? 0
-        : Math.max(0, Number(data.tds_amount));
+      data.tds_amount === undefined
+        ? undefined
+        : data.tds_amount === null || data.tds_amount === ""
+          ? 0
+          : Math.max(0, Number(data.tds_amount));
 
-    if (!Number.isFinite(tdsAmount)) {
+    if (tdsAmount !== undefined && !Number.isFinite(tdsAmount)) {
       throw new Error("tds_amount must be a valid number");
     }
 
     const advanceTaxAmount =
-      data.advance_tax_amount === undefined ||
-      data.advance_tax_amount === null ||
-      data.advance_tax_amount === ""
-        ? 0
-        : Math.max(0, Number(data.advance_tax_amount));
+      data.advance_tax_amount === undefined
+        ? undefined
+        : data.advance_tax_amount === null || data.advance_tax_amount === ""
+          ? 0
+          : Math.max(0, Number(data.advance_tax_amount));
 
-    if (!Number.isFinite(advanceTaxAmount)) {
+    if (advanceTaxAmount !== undefined && !Number.isFinite(advanceTaxAmount)) {
       throw new Error("advance_tax_amount must be a valid number");
     }
 
     // return validated data
     return {
+      tin_number: tinNumber,
       date_of_birth: data.date_of_birth,
       gender: gender,
       minimum_tax_area: minimumTaxArea,
       is_new_taxpayer: isNewTaxpayer,
+      filing_history_status: isNewTaxpayer ? "FIRST_TIME_FILER" : "PREVIOUS_FILER",
+      filing_history_verified: 1,
       is_physically_challenged: data.is_physically_challenged,
       disabled_child_dependents: disabledChildDependents,
       is_freedom_fighter: data.is_freedom_fighter,

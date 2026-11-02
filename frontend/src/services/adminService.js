@@ -59,6 +59,31 @@ const AdminService = {
 
     return response.data;
   },
+
+  async getAllCalculations() {
+    const response = await axiosPublic.get(
+      "/admin/calculations",
+    );
+
+    return response.data;
+  },
+
+  async getAllTaxReturns(params = {}) {
+    const response = await axiosPublic.get(
+      "/tax-returns",
+      { params },
+    );
+
+    return response.data;
+  },
+
+  async getAuditLogs() {
+    const response = await axiosPublic.get(
+      "/admin/audit-logs",
+    );
+
+    return response.data;
+  },
 };
 
 export default AdminService;

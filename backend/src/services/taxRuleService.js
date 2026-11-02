@@ -242,24 +242,7 @@ const TaxRuleService = {
     }
 
     // determine status
-    // existing active year:
-    // new slab => active
-    // existing inactive year:
-    // new slab => inactive
-    // new year:
-    // new slab => inactive
-
-    let status =
-      "INACTIVE";
-
-    if (
-      yearStatus &&
-      yearStatus.status ===
-        "ACTIVE"
-    ) {
-      status =
-        "ACTIVE";
-    }
+    let status = data.status || (yearStatus && yearStatus.status === "INACTIVE" ? "INACTIVE" : "ACTIVE");
 
 
     return await TaxRuleModel.createTaxRule(
@@ -715,7 +698,37 @@ const TaxRuleService = {
       overviewByYear,
     };
   },
+  // get rule by id
+  async getTaxRuleById(id) {
+    const rule = await TaxRuleModel.getRuleById(id);
+    if (!rule) {
+      throw new Error('Tax rule not found.');
+    }
+    return rule;
+  },
+
+  // toggle rule status
+  async toggleRuleStatus(id, status) {
+    if (!['ACTIVE', 'INACTIVE'].includes(status)) {
+      throw new Error('Status must be ACTIVE or INACTIVE.');
+    }
+    const rule = await TaxRuleModel.getRuleById(id);
+    if (!rule) {
+      throw new Error('Tax rule not found.');
+    }
+    await TaxRuleModel.toggleStatus(id, status);
+    return { id, status };
+  },
+
+  // delete tax rule (individual slab)
+  async deleteTaxRule(id) {
+    const rule = await TaxRuleModel.getRuleById(id);
+    if (!rule) {
+      throw new Error('Tax rule not found.');
+    }
+    await TaxRuleModel.deleteTaxRule(id);
+    return { id, action: 'DELETED', message: 'Tax slab deleted successfully.' };
+  },
 };
 
-module.exports =
-  TaxRuleService;
+module.exports = TaxRuleService;

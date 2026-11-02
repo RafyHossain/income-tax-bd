@@ -35,6 +35,7 @@ const STANDARD_AREAS = [
 ];
 
 const initialFormData = {
+  tin_number: "",
   date_of_birth: "",
   gender: "",
   minimum_tax_area: "DHAKA_NORTH",
@@ -44,8 +45,6 @@ const initialFormData = {
   net_wealth: "",
   has_multiple_motor_vehicles: false,
   has_large_house_property: false,
-  tds_amount: "",
-  advance_tax_amount: "",
 };
 
 
@@ -228,6 +227,9 @@ const Profile = () => {
       setProfileExists(true);
 
       setFormData({
+        tin_number:
+          data.tin_number || "",
+
         date_of_birth:
           data.date_of_birth
             ? String(
@@ -262,12 +264,6 @@ const Profile = () => {
 
         has_large_house_property:
           Boolean(data.has_large_house_property),
-
-        tds_amount:
-          data.tds_amount != null ? String(data.tds_amount) : "",
-
-        advance_tax_amount:
-          data.advance_tax_amount != null ? String(data.advance_tax_amount) : "",
       });
 
       setEditing(false);
@@ -362,6 +358,15 @@ const Profile = () => {
     } = event.target;
 
     const val = type === "checkbox" ? checked : value;
+
+    if (name === "tin_number") {
+      const clean = String(val).replace(/\D/g, "").slice(0, 12);
+      setFormData((previousData) => ({
+        ...previousData,
+        tin_number: clean,
+      }));
+      return;
+    }
 
     if (name === "date_of_birth") {
       setFormData((previousData) => {
@@ -475,6 +480,11 @@ const Profile = () => {
   ) => {
     event.preventDefault();
 
+    if (formData.tin_number && !/^[0-9]{12}$/.test(formData.tin_number)) {
+      toast.error("e-TIN must contain exactly 12 digits");
+      return;
+    }
+
 
     if (!formData.date_of_birth) {
       toast.error(
@@ -561,6 +571,9 @@ const Profile = () => {
     }
 
     const payload = {
+      tin_number:
+        formData.tin_number ? String(formData.tin_number).trim() : undefined,
+
       date_of_birth:
         formData.date_of_birth,
 
@@ -591,14 +604,7 @@ const Profile = () => {
 
       has_large_house_property:
         Boolean(formData.has_large_house_property),
-
-      tds_amount:
-        Math.max(0, Number(formData.tds_amount || 0)),
-
-      advance_tax_amount:
-        Math.max(0, Number(formData.advance_tax_amount || 0)),
     };
-
 
     try {
       setSaving(true);
@@ -650,6 +656,9 @@ const Profile = () => {
 
 
     setFormData({
+      tin_number:
+        profile.tin_number || "",
+
       date_of_birth:
         profile.date_of_birth
           ? String(
@@ -899,6 +908,22 @@ const Profile = () => {
 
           </div>
 
+          {/* e-TIN */}
+
+          <div>
+
+            <p className="text-xs font-medium text-slate-500">
+              e-TIN Number
+            </p>
+
+            <p className="mt-1 font-mono text-sm font-semibold tracking-wider text-slate-900">
+              {profile?.tin_number || user?.tin_number || (
+                <span className="font-sans text-xs font-normal text-amber-600">Not assigned</span>
+              )}
+            </p>
+
+          </div>
+
         </div>
 
       </div>
@@ -969,6 +994,47 @@ const Profile = () => {
           >
 
             <div className="grid gap-5 md:grid-cols-2">
+
+              {/* =================================================
+                  e-TIN NUMBER (12 DIGITS)
+              ================================================== */}
+
+              <div className="md:col-span-2">
+
+                <label
+                  htmlFor="tin_number"
+                  className="mb-2 block text-sm font-medium text-slate-700"
+                >
+                  e-TIN Number (12 Digits)
+                  <span className="ml-1.5 text-xs font-normal text-slate-500">
+                    (Electronic Taxpayer Identification Number)
+                  </span>
+                </label>
+
+                <div className="relative">
+
+                  <CreditCard className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+
+                  <input
+                    id="tin_number"
+                    name="tin_number"
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={12}
+                    value={formData.tin_number}
+                    onChange={handleChange}
+                    placeholder="Enter your 12-digit e-TIN"
+                    disabled={saving}
+                    className="h-11 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 font-mono text-sm tracking-wider text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-50"
+                  />
+
+                </div>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  Must be exactly 12 numeric digits registered with NBR.
+                </p>
+
+              </div>
 
               {/* =================================================
                   DATE OF BIRTH
@@ -1386,80 +1452,6 @@ const Profile = () => {
             </div>
 
             {/* =================================================
-                TAX CREDITS: TDS & ADVANCE TAX
-            ================================================== */}
-
-            <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 space-y-4">
-              <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-                <Receipt className="h-5 w-5 text-emerald-600" />
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Tax Credits (TDS &amp; Advance Tax)
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Taxes already prepaid or deducted at source.
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label
-                    htmlFor="tds_amount"
-                    className="mb-1.5 block text-sm font-medium text-slate-700"
-                  >
-                    Tax Deducted at Source (TDS)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">BDT</span>
-                    <input
-                      id="tds_amount"
-                      name="tds_amount"
-                      type="number"
-                      min="0"
-                      step="100"
-                      value={formData.tds_amount}
-                      onChange={handleChange}
-                      disabled={saving}
-                      placeholder="0.00"
-                      className="h-11 w-full rounded-lg border border-slate-200 bg-white pl-12 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-50"
-                    />
-                  </div>
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    Deducted from salary, bank profit, or sales.
-                  </p>
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="advance_tax_amount"
-                    className="mb-1.5 block text-sm font-medium text-slate-700"
-                  >
-                    Advance Income Tax Paid
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">BDT</span>
-                    <input
-                      id="advance_tax_amount"
-                      name="advance_tax_amount"
-                      type="number"
-                      min="0"
-                      step="100"
-                      value={formData.advance_tax_amount}
-                      onChange={handleChange}
-                      disabled={saving}
-                      placeholder="0.00"
-                      className="h-11 w-full rounded-lg border border-slate-200 bg-white pl-12 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-50"
-                    />
-                  </div>
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    Advance tax paid under Section 153/154.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* =================================================
                 ACTION BUTTONS
             ================================================== */}
 
@@ -1518,6 +1510,30 @@ const Profile = () => {
           <div className="p-5 sm:p-6">
 
             <div className="grid gap-x-8 gap-y-6 md:grid-cols-2">
+
+              {/* e-TIN NUMBER */}
+
+              <div className="md:col-span-2 rounded-lg border border-slate-100 bg-slate-50/70 p-3.5">
+
+                <p className="text-xs font-medium text-slate-500">
+                  e-TIN (Electronic Taxpayer Identification Number)
+                </p>
+
+                <div className="mt-1 flex items-center gap-2">
+
+                  <span className="font-mono text-sm font-semibold tracking-wider text-slate-900">
+                    {profile?.tin_number || "Not assigned"}
+                  </span>
+
+                  {profile?.tin_number && (
+                    <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                      12 Digits Verified Format
+                    </span>
+                  )}
+
+                </div>
+
+              </div>
 
               {/* DATE OF BIRTH */}
 
@@ -1694,28 +1710,6 @@ const Profile = () => {
                     House &gt; 8,000 sq ft: {profile?.has_large_house_property ? "Yes" : "No"}
                   </span>
                 </div>
-              </div>
-
-              {/* TDS AMOUNT */}
-
-              <div>
-                <p className="text-xs font-medium text-slate-500">
-                  Tax Deducted at Source (TDS Credit)
-                </p>
-                <p className="mt-1 text-sm font-medium text-slate-900">
-                  BDT {Number(profile?.tds_amount || 0).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
-              </div>
-
-              {/* ADVANCE TAX */}
-
-              <div>
-                <p className="text-xs font-medium text-slate-500">
-                  Advance Tax Paid (Advance Credit)
-                </p>
-                <p className="mt-1 text-sm font-medium text-slate-900">
-                  BDT {Number(profile?.advance_tax_amount || 0).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
               </div>
 
             </div>

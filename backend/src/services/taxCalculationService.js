@@ -5,6 +5,7 @@ const TaxCalculationModel = require("../models/taxCalculationModel");
 const TaxCalculationDetailModel = require("../models/taxCalculationDetailModel");
 
 const MinimumTaxRuleModel = require("../models/minimumTaxRuleModel");
+const { getIncomeYearFromAssessmentYear } = require("../utils/taxYear");
 
 const TaxCalculationService = {
   // helper: validate + parse tax year
@@ -23,22 +24,31 @@ const TaxCalculationService = {
     const [startYearString, endYearString] =
       normalizedTaxYear.split("-");
 
-    const startYear = Number(startYearString);
-
-    const expectedEndYear = startYear + 1;
-
-    const expectedEndYearShort = String(expectedEndYear).slice(-2);
+    const ayStartYear = Number(startYearString);
+    const ayEndYear = ayStartYear + 1;
+    const expectedEndYearShort = String(ayEndYear).slice(-2);
 
     if (endYearString !== expectedEndYearShort) {
       throw new Error("Invalid tax year range");
     }
 
+    // Assessment Year (AY) represents the year immediately following the Income Year.
+    // Example: AY 2027-28 -> Income Year 2026-27 (Period: July 1, 2026 to June 30, 2027).
+    // Example: AY 2026-27 -> Income Year 2025-26 (Period: July 1, 2025 to June 30, 2026).
+    const incomeStartYear = ayStartYear - 1;
+    const incomeEndYear = ayStartYear;
+    const incomeYear = `${incomeStartYear}-${String(incomeEndYear).slice(-2)}`;
+
     return {
       taxYear: normalizedTaxYear,
-      startYear,
-      endYear: expectedEndYear,
-      incomeStartDate: `${startYear}-07-01`,
-      incomeEndDate: `${expectedEndYear}-06-30`,
+      assessmentYear: normalizedTaxYear,
+      incomeYear,
+      startYear: ayStartYear,
+      endYear: ayEndYear,
+      ayStartDate: `${ayStartYear}-07-01`,
+      ayEndDate: `${ayEndYear}-06-30`,
+      incomeStartDate: `${incomeStartYear}-07-01`,
+      incomeEndDate: `${incomeEndYear}-06-30`,
     };
   },
 
@@ -145,9 +155,9 @@ const TaxCalculationService = {
       return "WAR_WOUNDED_FREEDOM_FIGHTER";
     }
 
-    // july warrior (gazetted persons injured in July 2024 uprising, legally enacted from AY 2026-27)
+    // july warrior (gazetted persons injured in July 2024 uprising, legally enacted from AY 2026-27 onwards)
     if (Number(profile.is_july_warrior) === 1) {
-      if (!taxYear || taxYear === "2026-27") {
+      if (!taxYear || Number(taxYear.split("-")[0]) >= 2026) {
         return "JULY_WARRIOR";
       }
     }
@@ -192,12 +202,12 @@ const TaxCalculationService = {
   },
 
   // helper: get minimum tax from database
-  async getMinimumTaxRule(taxYear, profile = {}) {
+  async getMinimumTaxRule(taxYear, profile = {}, options = {}) {
     if (!taxYear) {
       throw new Error("Tax year is required");
     }
 
-    const minimumTaxRule = await MinimumTaxRuleModel.findEffectiveRule(taxYear, profile);
+    const minimumTaxRule = await MinimumTaxRuleModel.findEffectiveRule(taxYear, profile, options);
 
     if (!minimumTaxRule) {
       throw new Error(`Minimum tax rule not found for tax year ${taxYear}`);
@@ -215,16 +225,18 @@ const TaxCalculationService = {
       areaCode: minimumTaxRule.area_code,
       areaName: minimumTaxRule.area_name,
       amount: this.roundMoney(minimumTax),
+      taxpayerClassification: minimumTaxRule.taxpayerClassification || null,
+      filingHistoryStatus: minimumTaxRule.filingHistoryStatus || null,
     };
   },
 
-  async getMinimumTaxByArea(taxYear, minimumTaxArea) {
-    return await this.getMinimumTaxRule(taxYear, { minimum_tax_area: minimumTaxArea });
+  async getMinimumTaxByArea(taxYear, minimumTaxArea, options = {}) {
+    return await this.getMinimumTaxRule(taxYear, { minimum_tax_area: minimumTaxArea }, options);
   },
 
   // calculate tax
 
-  async calculateTax(userId, taxYear) {
+  async calculateTax(userId, taxYear, options = {}) {
     // 1. basic validation
 
     if (!userId) {
@@ -235,8 +247,12 @@ const TaxCalculationService = {
 
     const {
       taxYear: normalizedTaxYear,
+      assessmentYear,
+      incomeYear,
       startYear,
       endYear,
+      ayStartDate,
+      ayEndDate,
       incomeStartDate,
       incomeEndDate,
     } = this.parseTaxYear(taxYear);
@@ -255,10 +271,13 @@ const TaxCalculationService = {
     const profileRows = await query(
       `
           SELECT
+            user_id,
             date_of_birth,
             gender,
             minimum_tax_area,
             is_new_taxpayer,
+            filing_history_status,
+            filing_history_verified,
             is_physically_challenged,
             disabled_child_dependents,
             is_freedom_fighter,
@@ -282,7 +301,27 @@ const TaxCalculationService = {
       throw new Error("Taxpayer profile not found");
     }
 
-    const profile = profileRows[0];
+    // Check year-specific tax credits from tax_credits table
+    let yearTds = Number(profileRows[0].tds_amount || 0);
+    let yearAdvance = Number(profileRows[0].advance_tax_amount || 0);
+
+    const creditRows = await query(
+      `SELECT tds_amount, advance_tax_amount FROM tax_credits WHERE user_id = ? AND tax_year = ? LIMIT 1`,
+      [userId, normalizedTaxYear]
+    );
+
+    if (creditRows && creditRows.length > 0) {
+      yearTds = Number(creditRows[0].tds_amount || 0);
+      yearAdvance = Number(creditRows[0].advance_tax_amount || 0);
+    }
+
+    const profile = {
+      ...profileRows[0],
+      tds_amount: yearTds,
+      advance_tax_amount: yearAdvance,
+      ...(options?.profileOverride || {}),
+      user_id: profileRows[0].user_id || userId,
+    };
 
     // 4. determine taxpayer category
 
@@ -302,7 +341,7 @@ const TaxCalculationService = {
           WHERE tax_year = ?
             AND category = ?
             AND status = 'ACTIVE'
-            AND effective_from <= ?
+            AND (effective_from IS NULL OR effective_from <= ?)
             AND (
               effective_to IS NULL
               OR effective_to >= ?
@@ -315,8 +354,8 @@ const TaxCalculationService = {
       [
         normalizedTaxYear,
         category,
-        incomeEndDate,
-        incomeStartDate,
+        ayEndDate,
+        ayStartDate,
       ],
     );
 
@@ -372,19 +411,21 @@ const TaxCalculationService = {
         disabledChildAdditionalThreshold,
       );
 
-    // 7. get total income
-
+    // 7. get income records & head-by-head breakdown
     const incomeRows = await query(
       `
           SELECT
-            COALESCE(
-              SUM(amount),
-              0
-            ) AS total_income
+            id,
+            income_type,
+            source_name,
+            amount,
+            income_date,
+            description
           FROM income
           WHERE user_id = ?
             AND income_date BETWEEN ?
             AND ?
+          ORDER BY id ASC
         `,
       [
         userId,
@@ -393,9 +434,66 @@ const TaxCalculationService = {
       ],
     );
 
-    const totalIncome = this.roundMoney(
-      incomeRows[0]?.total_income,
-    );
+    let totalIncome = 0;
+    let salaryIncome = 0;
+    let housePropertyIncome = 0;
+    let businessIncome = 0;
+    let agricultureIncome = 0;
+    let capitalGainIncome = 0;
+    let otherIncome = 0;
+
+    // Track Section 40(2) composite tea/rubber apportionments
+    let teaRubberApportionedAgri = 0;
+    let teaRubberApportionedBiz = 0;
+
+    for (const inc of incomeRows) {
+      const amt = this.roundMoney(Number(inc.amount) || 0);
+      totalIncome = this.roundMoney(totalIncome + amt);
+
+      const type = String(inc.income_type || "").trim().toUpperCase();
+      const desc = String(inc.description || "").toUpperCase();
+      const src = String(inc.source_name || "").toUpperCase();
+
+      // Section 40(2) composite income apportionment (Tea/Rubber cultivation & manufacture)
+      // Tea: 60% agricultural income, 40% business income (Statutory apportionment rule)
+      const isTeaComposite = type === "TEA_ESTATE" || desc.includes("TEA ESTATE") || desc.includes("TEA MANUFACTURE") || src.includes("TEA ESTATE");
+      const isRubberComposite = type === "RUBBER_ESTATE" || desc.includes("RUBBER ESTATE") || src.includes("RUBBER ESTATE");
+
+      if (isTeaComposite || isRubberComposite) {
+        const agriRate = 0.60;
+        const bizRate = 0.40;
+        const agriPart = this.roundMoney(amt * agriRate);
+        const bizPart = this.roundMoney(amt * bizRate);
+        agricultureIncome = this.roundMoney(agricultureIncome + agriPart);
+        businessIncome = this.roundMoney(businessIncome + bizPart);
+        teaRubberApportionedAgri = this.roundMoney(teaRubberApportionedAgri + agriPart);
+        teaRubberApportionedBiz = this.roundMoney(teaRubberApportionedBiz + bizPart);
+        continue;
+      }
+
+      if (type === "SALARY" || type === "EMPLOYMENT") {
+        salaryIncome = this.roundMoney(salaryIncome + amt);
+      } else if (type === "HOUSE_RENT" || type === "RENT" || type === "HOUSE_PROPERTY") {
+        housePropertyIncome = this.roundMoney(housePropertyIncome + amt);
+      } else if (type === "BUSINESS") {
+        businessIncome = this.roundMoney(businessIncome + amt);
+      } else if (type === "AGRICULTURE") {
+        agricultureIncome = this.roundMoney(agricultureIncome + amt);
+      } else if (type === "CAPITAL_GAIN" || type === "CAPITAL_GAINS") {
+        capitalGainIncome = this.roundMoney(capitalGainIncome + amt);
+      } else if (
+        type === "DIVIDEND" ||
+        type === "OTHER_SOURCES" ||
+        type === "OTHER" ||
+        type === "PROFESSIONAL_FEES" ||
+        type === "PENSION" ||
+        type === "FINANCIAL_ASSETS"
+      ) {
+        otherIncome = this.roundMoney(otherIncome + amt);
+      } else {
+        otherIncome = this.roundMoney(otherIncome + amt);
+      }
+    }
 
     if (totalIncome < 0) {
       throw new Error(
@@ -403,34 +501,8 @@ const TaxCalculationService = {
       );
     }
 
-    // 7b. get salary receipts & statutory salary exemption (Section 32 & 6th Schedule Part B)
-    // Rule: MIN(EligibleSalaryReceipts / 3, 450,000)
-
-    const salaryRows = await query(
-      `
-          SELECT
-            COALESCE(
-              SUM(amount),
-              0
-            ) AS salary_income
-          FROM income
-          WHERE user_id = ?
-            AND income_type = 'SALARY'
-            AND income_date BETWEEN ?
-            AND ?
-        `,
-      [
-        userId,
-        incomeStartDate,
-        incomeEndDate,
-      ],
-    );
-
-    const salaryIncome = this.roundMoney(
-      salaryRows[0]?.salary_income,
-    );
-
-    // Statutory salary exemption: database-oriented rule from salary_exemption_rules
+    // 7b. get statutory salary exemption (Section 32 & 6th Schedule Part B)
+    // Rule: MIN(EligibleSalaryReceipts / 3, 500,000 for AY 2026-27)
     const salaryRuleRows = await query(
       `
         SELECT
@@ -446,30 +518,156 @@ const TaxCalculationService = {
       [normalizedTaxYear],
     );
 
-    let maxSalaryExemption = ["2025-26", "2026-27"].includes(normalizedTaxYear) ? 500000 : 450000;
+    let maxSalaryExemption = Number(normalizedTaxYear.split("-")[0]) >= 2025 ? 500000 : 450000;
     let salaryExemption = 0;
 
-    if (salaryRuleRows.length > 0) {
-      const activeSalaryRule = salaryRuleRows[0];
-      maxSalaryExemption = Number(activeSalaryRule.max_exemption_amount) || maxSalaryExemption;
+    if (salaryIncome > 0) {
+      if (salaryRuleRows.length > 0) {
+        const activeSalaryRule = salaryRuleRows[0];
+        maxSalaryExemption = Number(activeSalaryRule.max_exemption_amount) || maxSalaryExemption;
 
-      let rawExemption = 0;
-      if (activeSalaryRule.calculation_type === "PERCENTAGE") {
-        const pct = Number(activeSalaryRule.exemption_percentage) || 33.3333333;
-        rawExemption = (salaryIncome * pct) / 100;
+        let rawExemption = 0;
+        if (activeSalaryRule.calculation_type === "PERCENTAGE") {
+          const pct = Number(activeSalaryRule.exemption_percentage) || 33.3333333;
+          rawExemption = (salaryIncome * pct) / 100;
+        } else {
+          // ONE_THIRD (Statutory 1/3 of total salary receipts)
+          rawExemption = salaryIncome / 3;
+        }
+
+        salaryExemption = this.roundMoney(
+          Math.min(rawExemption, maxSalaryExemption),
+        );
       } else {
-        // ONE_THIRD (Statutory 1/3 of total salary receipts)
-        rawExemption = salaryIncome / 3;
+        salaryExemption = this.roundMoney(
+          Math.min(salaryIncome / 3, maxSalaryExemption),
+        );
+      }
+    }
+
+    // 7c. Section 38 House Property Deductions (Residential 25% vs Commercial 30%)
+    let housePropertyDeduction = 0;
+    let housePropertyClassification = options?.propertyClassification || null;
+    let housePropertyStatus = "NONE";
+
+    if (housePropertyIncome > 0) {
+      const hpRules = await query(
+        `SELECT exemption_code, calculation_type, exemption_rate, max_exemption_amount
+         FROM income_exemption_rules
+         WHERE tax_year = ? AND income_type = 'HOUSE_PROPERTY' AND status = 'ACTIVE'`,
+        [normalizedTaxYear]
+      );
+
+      const residentialRule = hpRules.find(r => r.exemption_code === 'HOUSE_PROPERTY_REPAIR_RESIDENTIAL');
+      const commercialRule = hpRules.find(r => r.exemption_code === 'HOUSE_PROPERTY_REPAIR_COMMERCIAL');
+
+      // If not passed explicitly in options, determine from verified records
+      if (!housePropertyClassification) {
+        const hasResidential = incomeRows.some(
+          r => ['HOUSE_RENT', 'RENT', 'HOUSE_PROPERTY'].includes(String(r.income_type).toUpperCase()) &&
+               (String(r.source_name).toUpperCase().includes('RESIDENTIAL') || String(r.description).toUpperCase().includes('RESIDENTIAL'))
+        );
+        const hasCommercial = incomeRows.some(
+          r => ['HOUSE_RENT', 'RENT', 'HOUSE_PROPERTY'].includes(String(r.income_type).toUpperCase()) &&
+               (String(r.source_name).toUpperCase().includes('COMMERCIAL') || String(r.description).toUpperCase().includes('COMMERCIAL'))
+        );
+
+        if (hasResidential && !hasCommercial) {
+          housePropertyClassification = 'RESIDENTIAL';
+        } else if (hasCommercial && !hasResidential) {
+          housePropertyClassification = 'COMMERCIAL';
+        } else if (options?.allowUnverifiedPropertyDeduction === false) {
+          housePropertyClassification = 'UNVERIFIED';
+        } else {
+          housePropertyClassification = 'RESIDENTIAL';
+        }
       }
 
-      salaryExemption = this.roundMoney(
-        Math.min(rawExemption, maxSalaryExemption),
+      if (housePropertyClassification === 'COMMERCIAL') {
+        const rate = commercialRule ? Number(commercialRule.exemption_rate) : 30.00;
+        housePropertyDeduction = this.roundMoney(housePropertyIncome * (rate / 100));
+        housePropertyStatus = 'VERIFIED_COMMERCIAL';
+      } else if (housePropertyClassification === 'RESIDENTIAL') {
+        const rate = residentialRule ? Number(residentialRule.exemption_rate) : 25.00;
+        housePropertyDeduction = this.roundMoney(housePropertyIncome * (rate / 100));
+        housePropertyStatus = 'VERIFIED_RESIDENTIAL';
+      } else if (housePropertyClassification === 'UNVERIFIED' || housePropertyClassification === 'BLOCKED') {
+        housePropertyDeduction = 0;
+        housePropertyStatus = 'BLOCKED_UNVERIFIED_CLASSIFICATION';
+      } else {
+        housePropertyDeduction = 0;
+        housePropertyStatus = 'BLOCKED_UNVERIFIED_CLASSIFICATION';
+      }
+    }
+
+    // 7d. Section 42 Actual Agricultural Expenses & Section 43 Special 60% Deduction
+    let agricultureDeduction = 0;
+    let agricultureDeductionStatus = "NONE";
+
+    if (agricultureIncome > 0) {
+      // Section 42: actual allowable agricultural expenses
+      const agriExpenseRows = await query(
+        `SELECT COALESCE(SUM(amount), 0) AS total_agri_expense
+         FROM expenses
+         WHERE user_id = ?
+           AND (expense_category = 'AGRICULTURE' OR expense_type LIKE '%AGRI%')
+           AND is_tax_deductible = 1
+           AND expense_date BETWEEN ? AND ?`,
+        [userId, incomeStartDate, incomeEndDate]
       );
-    } else {
-      // Robust statutory fallback if rule is not configured in DB
-      salaryExemption = this.roundMoney(
-        Math.min(salaryIncome / 3, maxSalaryExemption),
+      const actualAgriExpenses = this.roundMoney(
+        Number(agriExpenseRows[0]?.total_agri_expense || 0) +
+        Number(options?.actualAgriculturalExpenses || 0)
       );
+
+      // Section 43: 60% Special Deduction Eligibility Verification
+      // Statutory Conditions:
+      // 1. Accounting status must be established as NO_ACCOUNTS (regular books of accounts not maintained)
+      // 2. Agricultural produce must be directly cultivated by taxpayer (NOT land lease / orchard lease / cash rent)
+      // 3. Must NEVER apply automatically without established conditions
+      const agriAccountingStatus = options?.agricultureAccountingStatus || profile.agriculture_accounting_status || null;
+      const agriEligibilityEstablished = options?.agricultureEligibilityEstablished || false;
+      const isClaimingSection43 = options?.claimSection43SpecialDeduction === true || agriAccountingStatus === 'NO_ACCOUNTS';
+
+      if (isClaimingSection43) {
+        if (!agriEligibilityEstablished && !options?.agricultureAccountingStatus) {
+          // Eligibility cannot be established -> mark BLOCKED rather than assuming it
+          agricultureDeduction = 0;
+          agricultureDeductionStatus = 'BLOCKED_UNVERIFIED_ACCOUNTING_ELIGIBILITY';
+        } else if (agriAccountingStatus === 'ACCOUNTS_MAINTAINED') {
+          // Accounts maintained: Section 43 is legally disallowed; actual expenses under Section 42 apply
+          agricultureDeduction = actualAgriExpenses;
+          agricultureDeductionStatus = 'SECTION_42_ACTUAL_EXPENSES';
+        } else if (agriAccountingStatus === 'NO_ACCOUNTS') {
+          // Calculate direct cultivation produce (excluding land / orchard lease)
+          let directCultivationIncome = 0;
+          for (const inc of incomeRows) {
+            if (String(inc.income_type).toUpperCase() === 'AGRICULTURE') {
+              const desc = String(inc.description || "").toUpperCase();
+              const src = String(inc.source_name || "").toUpperCase();
+              const isLease = desc.includes('LEASE') || src.includes('LEASE') || desc.includes('RENT') || src.includes('ORCHARD LEASE');
+              if (!isLease) {
+                directCultivationIncome = this.roundMoney(directCultivationIncome + Number(inc.amount));
+              }
+            }
+          }
+
+          const agriRuleRows = await query(
+            `SELECT exemption_code, calculation_type, exemption_rate, max_exemption_amount
+             FROM income_exemption_rules
+             WHERE tax_year = ? AND income_type = 'AGRICULTURE' AND status = 'ACTIVE'
+             ORDER BY id DESC LIMIT 1`,
+            [normalizedTaxYear]
+          );
+          const agriRate = agriRuleRows.length > 0 ? Number(agriRuleRows[0].exemption_rate) : 60.00;
+          agricultureDeduction = this.roundMoney(directCultivationIncome * (agriRate / 100));
+          agricultureDeductionStatus = 'SECTION_43_SPECIAL_60_PERCENT';
+        }
+      } else {
+        // Standard Section 42: actual allowable expenses
+        agricultureDeduction = actualAgriExpenses;
+        agricultureDeductionStatus = actualAgriExpenses > 0 ? 'SECTION_42_ACTUAL_EXPENSES' : 'NO_AGRI_DEDUCTION';
+      }
     }
 
     // 8. get eligible investment (DPS capped per rule, life insurance premium capped at 10% of sum assured)
@@ -522,7 +720,7 @@ const TaxCalculationService = {
               ) AS total_amount
             FROM tax_deductions td
             WHERE td.user_id = ?
-              AND td.tax_year = ?
+              AND (td.tax_year = ? OR td.tax_year = ?)
               AND td.deduction_date BETWEEN ?
               AND ?
             GROUP BY
@@ -533,7 +731,7 @@ const TaxCalculationService = {
                tr.deduction_code
             AND tr.tax_year = ?
           WHERE tr.status = 'ACTIVE'
-            AND tr.effective_from <= ?
+            AND (tr.effective_from IS NULL OR tr.effective_from <= ?)
             AND (
               tr.effective_to IS NULL
               OR tr.effective_to >= ?
@@ -542,11 +740,12 @@ const TaxCalculationService = {
       [
         userId,
         normalizedTaxYear,
+        incomeYear,
         incomeStartDate,
         incomeEndDate,
         normalizedTaxYear,
-        incomeEndDate,
-        incomeStartDate,
+        ayEndDate,
+        ayStartDate,
       ],
     );
 
@@ -584,12 +783,12 @@ const TaxCalculationService = {
           ?.total_deductible_expense,
       );
 
-    // Total statutory deduction: salary exemption + tax-deductible business expenses
+    // Total statutory deduction: salary exemption + tax-deductible business expenses + house property repair + agriculture deduction
     // NOTE: Investment instruments (DPS, Life Insurance, Securities, Stocks, etc.) DO NOT reduce gross or taxable income;
     // they are solely for the Section 78 investment tax rebate.
     const totalDeduction =
       this.roundMoney(
-        salaryExemption + totalDeductibleExpense,
+        salaryExemption + totalDeductibleExpense + housePropertyDeduction + agricultureDeduction,
       );
 
     // 10. calculate taxable income
@@ -615,7 +814,7 @@ const TaxCalculationService = {
           FROM tax_rules
           WHERE tax_year = ?
             AND status = 'ACTIVE'
-            AND effective_from <= ?
+            AND (effective_from IS NULL OR effective_from <= ?)
             AND (
               effective_to IS NULL
               OR effective_to >= ?
@@ -626,8 +825,8 @@ const TaxCalculationService = {
         `,
       [
         normalizedTaxYear,
-        incomeEndDate,
-        incomeStartDate,
+        ayEndDate,
+        ayStartDate,
       ],
     );
 
@@ -790,7 +989,7 @@ const TaxCalculationService = {
         details.push({
           taxRuleId: rule.id,
           slabOrder: details.length + 1,
-          minimumIncome: slabStart,
+          minimumIncome: slabStart + 1,
           maximumIncome: slabEnd,
           taxRate,
           taxableAmount,
@@ -826,7 +1025,7 @@ const TaxCalculationService = {
           FROM tax_rebate_rules
           WHERE tax_year = ?
             AND status = 'ACTIVE'
-            AND effective_from <= ?
+            AND (effective_from IS NULL OR effective_from <= ?)
             AND (
               effective_to IS NULL
               OR effective_to >= ?
@@ -836,8 +1035,8 @@ const TaxCalculationService = {
         `,
         [
           normalizedTaxYear,
-          incomeEndDate,
-          incomeStartDate,
+          ayEndDate,
+          ayStartDate,
         ],
       );
 
@@ -1117,43 +1316,76 @@ const TaxCalculationService = {
 
     const netTax = taxAfterRebate;
 
-    // 22. get minimum tax from database
+    // 22. determine minimum tax eligibility (Steps 5, 6, 7, 8, 9)
 
-    const minimumTaxRule =
-      await this.getMinimumTaxRule(
-        normalizedTaxYear,
-        profile,
-      );
-
-    const minimumTax =
-      minimumTaxRule.amount;
-
-    const minimumTaxArea =
-      minimumTaxRule.areaCode;
-
-    const minimumTaxAreaName =
-      minimumTaxRule.areaName;
-
-    // 23. apply minimum tax
-
-    const minimumTaxApplicable =
-      totalIncome >
+    let minimumTaxApplicable =
+      taxableIncome >
       taxFreeThreshold;
 
-    const minimumTaxApplied =
-      minimumTaxApplicable &&
-      taxAfterRebate <
-      minimumTax;
+    let minimumTaxRule = null;
+    let minimumTax = 0;
+    let minimumTaxArea = null;
+    let minimumTaxAreaName = null;
+    let minimumTaxRuleType = null;
+    let taxpayerClassification = null;
+    let filingHistoryStatus = null;
+    let minimumTaxRuleId = null;
+    let minimumTaxApplied = false;
+    let taxLiability = 0;
 
-    const taxLiability =
-      this.roundMoney(
-        minimumTaxApplicable
-          ? Math.max(
+    if (minimumTaxApplicable) {
+      // Step 7: Fetch the legally applicable active rule
+      minimumTaxRule =
+        await this.getMinimumTaxRule(
+          normalizedTaxYear,
+          profile,
+          {
+            effectiveDate: options.effectiveDate || ayStartDate,
+            taxYearEndDate,
+            ...options,
+          }
+        );
+
+      minimumTax =
+        minimumTaxRule.amount;
+
+      minimumTaxArea =
+        minimumTaxRule.areaCode;
+
+      minimumTaxAreaName =
+        minimumTaxRule.areaName;
+
+      minimumTaxRuleType =
+        minimumTaxRule.ruleType;
+
+      taxpayerClassification =
+        minimumTaxRule.taxpayerClassification || null;
+
+      filingHistoryStatus =
+        minimumTaxRule.filingHistoryStatus || null;
+
+      minimumTaxRuleId =
+        minimumTaxRule.id;
+
+      // Step 8 & 9: Apply only the applicable minimum tax & Prevent double application
+      minimumTaxApplied =
+        taxAfterRebate <
+        minimumTax;
+
+      taxLiability =
+        this.roundMoney(
+          Math.max(
             taxAfterRebate,
             minimumTax,
           )
-          : 0,
-      );
+        );
+    } else {
+      // Taxable income <= threshold: Tax Free! Minimum tax does NOT apply.
+      minimumTaxApplicable = false;
+      minimumTax = 0;
+      minimumTaxApplied = false;
+      taxLiability = 0;
+    }
 
     // 23b. calculate wealth surcharge (Income Tax Act 2023, Section 73 & Finance Acts)
 
@@ -1213,19 +1445,25 @@ const TaxCalculationService = {
     const advanceTaxAmount = this.roundMoney(profile.advance_tax_amount || 0);
     const totalTaxCredits = this.roundMoney(tdsAmount + advanceTaxAmount);
 
-    const finalPayable = this.roundMoney(
-      totalTaxPayable - totalTaxCredits,
+    const finalPayable = Math.max(
+      0,
+      this.roundMoney(totalTaxPayable - totalTaxCredits)
+    );
+    const refundAmount = Math.max(
+      0,
+      this.roundMoney(totalTaxCredits - totalTaxPayable)
     );
 
     // 24. create tax calculation + details
 
-    const connection =
-      await getConnection();
+    let calculationId = null;
 
-    let calculationId;
+    if (options?.persist !== false) {
+      const connection =
+        await getConnection();
 
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
       // insert tax calculation with full audit trail
 
@@ -1245,17 +1483,25 @@ const TaxCalculationService = {
               tax_liability,
               salary_income,
               salary_exemption,
+              house_property_income,
+              business_income,
+              capital_gain_income,
+              agriculture_income,
+              other_income,
               net_tax,
               minimum_tax,
+              minimum_tax_rule_id,
               net_wealth,
               surcharge_rate,
               surcharge_amount,
               total_tax_payable,
               tds_amount,
               advance_tax_amount,
-              final_payable
+              final_payable,
+              refund_amount,
+              filing_status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             userId,
@@ -1270,8 +1516,14 @@ const TaxCalculationService = {
             taxLiability,
             salaryIncome,
             salaryExemption,
+            housePropertyIncome,
+            businessIncome,
+            capitalGainIncome,
+            agricultureIncome,
+            otherIncome,
             netTax,
             minimumTax,
+            minimumTaxRuleId,
             netWealth,
             surchargeRate,
             surchargeAmount,
@@ -1279,6 +1531,8 @@ const TaxCalculationService = {
             tdsAmount,
             advanceTaxAmount,
             finalPayable,
+            refundAmount,
+            options?.filingStatus || "DRAFT",
           ],
         );
 
@@ -1340,6 +1594,7 @@ const TaxCalculationService = {
     } finally {
       connection.release();
     }
+  }
 
     // 25. return result
 
@@ -1351,6 +1606,16 @@ const TaxCalculationService = {
 
       taxYear:
         normalizedTaxYear,
+      tax_year:
+        normalizedTaxYear,
+      assessmentYear:
+        normalizedTaxYear,
+      assessment_year:
+        normalizedTaxYear,
+      incomeYear:
+        incomeYear,
+      income_year:
+        incomeYear,
 
       category,
 
@@ -1362,6 +1627,33 @@ const TaxCalculationService = {
 
       salaryExemption,
       salary_exemption: salaryExemption,
+
+      housePropertyIncome,
+      house_property_income: housePropertyIncome,
+
+      housePropertyDeduction,
+      house_property_deduction: housePropertyDeduction,
+
+      housePropertyStatus,
+      house_property_status: housePropertyStatus,
+
+      businessIncome,
+      business_income: businessIncome,
+
+      agricultureIncome,
+      agriculture_income: agricultureIncome,
+
+      agricultureDeduction,
+      agriculture_deduction: agricultureDeduction,
+
+      agricultureDeductionStatus,
+      agriculture_deduction_status: agricultureDeductionStatus,
+
+      capitalGainIncome,
+      capital_gain_income: capitalGainIncome,
+
+      otherIncome,
+      other_income: otherIncome,
 
       totalDeductibleExpense,
       total_deductible_expense: totalDeductibleExpense,
@@ -1421,17 +1713,26 @@ const TaxCalculationService = {
       minimumTax,
       minimum_tax: minimumTax,
 
+      minimumTaxRuleId,
+      minimum_tax_rule_id: minimumTaxRuleId,
+      selectedRuleId: minimumTaxRuleId,
+
+      minimumTaxRule,
+
       minimumTaxArea,
       minimum_tax_area: minimumTaxArea,
 
       minimumTaxAreaName,
       minimum_tax_area_name: minimumTaxAreaName,
 
-      minimumTaxRuleType: minimumTaxRule.ruleType,
-      minimum_tax_rule_type: minimumTaxRule.ruleType,
+      minimumTaxRuleType,
+      minimum_tax_rule_type: minimumTaxRuleType,
 
-      isNewTaxpayer: Number(profile.is_new_taxpayer || 0) === 1,
-      is_new_taxpayer: Number(profile.is_new_taxpayer || 0),
+      taxpayerClassification,
+      filingHistoryStatus,
+
+      isNewTaxpayer: taxpayerClassification === "NEW_TAXPAYER" || Number(profile.is_new_taxpayer || 0) === 1,
+      is_new_taxpayer: taxpayerClassification === "NEW_TAXPAYER" || Number(profile.is_new_taxpayer || 0) === 1 ? 1 : 0,
 
       minimumTaxApplicable,
       minimum_tax_applicable: minimumTaxApplicable,
@@ -1474,6 +1775,8 @@ const TaxCalculationService = {
 
       finalPayable,
       final_payable: finalPayable,
+      refundAmount,
+      refund_amount: refundAmount,
 
       details,
     };
@@ -1505,15 +1808,26 @@ const TaxCalculationService = {
 
     if (userId) {
       const profileRows = await query(
-        `SELECT minimum_tax_area, is_new_taxpayer, disabled_child_dependents, net_wealth, has_multiple_motor_vehicles, has_large_house_property, tds_amount, advance_tax_amount FROM taxpayer_profiles WHERE user_id = ? LIMIT 1`,
+        `SELECT minimum_tax_area, is_new_taxpayer, filing_history_status, filing_history_verified, disabled_child_dependents, net_wealth, has_multiple_motor_vehicles, has_large_house_property, tds_amount, advance_tax_amount FROM taxpayer_profiles WHERE user_id = ? LIMIT 1`,
         [userId]
       );
       if (profileRows && profileRows.length > 0) {
-        userProfile = profileRows[0];
+        userProfile = { ...profileRows[0], user_id: userId };
         minimumTaxArea = profileRows[0].minimum_tax_area || null;
         isNewTaxpayer = Number(profileRows[0].is_new_taxpayer || 0);
         disabledChildDependents = Number(profileRows[0].disabled_child_dependents || 0);
         disabledChildAdditionalThreshold = this.roundMoney(disabledChildDependents * 50000);
+
+        if (taxYear) {
+          const creditRows = await query(
+            `SELECT tds_amount, advance_tax_amount FROM tax_credits WHERE user_id = ? AND tax_year = ? LIMIT 1`,
+            [userId, taxYear]
+          );
+          if (creditRows && creditRows.length > 0) {
+            userProfile.tds_amount = creditRows[0].tds_amount;
+            userProfile.advance_tax_amount = creditRows[0].advance_tax_amount;
+          }
+        }
       }
     }
 
@@ -1592,14 +1906,18 @@ const TaxCalculationService = {
     let minimumTaxApplied = false;
 
     if (taxYear) {
-      const minRule = await MinimumTaxRuleModel.findEffectiveRule(taxYear, userProfile);
-      if (minRule) {
-        minimumTax = this.roundMoney(minRule.minimum_tax_amount);
-        minimumTaxAreaCode = minRule.area_code;
-        minimumTaxAreaName = minRule.area_name;
-        minimumTaxRuleType = minRule.rule_type;
-        minimumTaxApplicable = totalIncome > taxFreeThreshold;
-        minimumTaxApplied = minimumTaxApplicable && (taxAfterRebate < minimumTax);
+      try {
+        const minRule = await MinimumTaxRuleModel.findEffectiveRule(taxYear, userProfile);
+        if (minRule) {
+          minimumTax = this.roundMoney(minRule.minimum_tax_amount);
+          minimumTaxAreaCode = minRule.area_code;
+          minimumTaxAreaName = minRule.area_name;
+          minimumTaxRuleType = minRule.rule_type;
+          minimumTaxApplicable = taxableIncome > taxFreeThreshold;
+          minimumTaxApplied = minimumTaxApplicable && (taxAfterRebate < minimumTax);
+        }
+      } catch (err) {
+        console.warn("Could not determine effective minimum tax rule in enrichCalculation:", err.message);
       }
     }
 
@@ -1607,11 +1925,34 @@ const TaxCalculationService = {
 
     const salaryIncome = Number(calculation.salary_income ?? calculation.salaryIncome ?? 0);
     const salaryExemption = Number(calculation.salary_exemption ?? calculation.salaryExemption ?? 0);
-    const totalDeductibleExpense = Number(
+    const housePropertyIncome = Number(calculation.house_property_income ?? calculation.housePropertyIncome ?? 0);
+    const businessIncome = Number(calculation.business_income ?? calculation.businessIncome ?? 0);
+    const capitalGainIncome = Number(calculation.capital_gain_income ?? calculation.capitalGainIncome ?? 0);
+    const agricultureIncome = Number(calculation.agriculture_income ?? calculation.agricultureIncome ?? 0);
+    const otherIncome = Number(calculation.other_income ?? calculation.otherIncome ?? 0);
+
+    let housePropertyDeduction = Number(calculation.house_property_deduction ?? calculation.housePropertyDeduction ?? 0);
+    if (housePropertyDeduction === 0 && housePropertyIncome > 0) {
+      const statutoryHpAllowance = this.roundMoney(housePropertyIncome * 0.25);
+      if (totalDeduction >= salaryExemption + statutoryHpAllowance) {
+        housePropertyDeduction = statutoryHpAllowance;
+      }
+    }
+
+    const agricultureDeduction = Number(calculation.agriculture_deduction ?? calculation.agricultureDeduction ?? 0);
+
+    let totalDeductibleExpense = Number(
       calculation.total_deductible_expense ??
       calculation.totalDeductibleExpense ??
-      Math.max(0, totalDeduction - salaryExemption)
+      Math.max(0, totalDeduction - salaryExemption - housePropertyDeduction - agricultureDeduction)
     );
+
+    if (
+      housePropertyDeduction > 0 &&
+      Math.abs(totalDeductibleExpense + salaryExemption - totalDeduction) < 0.01
+    ) {
+      totalDeductibleExpense = Math.max(0, totalDeductibleExpense - housePropertyDeduction);
+    }
     const netTax = Number(calculation.net_tax ?? calculation.netTax ?? taxAfterRebate);
     const netWealth = Number(calculation.net_wealth ?? calculation.netWealth ?? userProfile.net_wealth ?? 0);
     const hasMultipleMotorVehicles = Number(calculation.has_multiple_motor_vehicles ?? calculation.hasMultipleMotorVehicles ?? userProfile.has_multiple_motor_vehicles ?? 0);
@@ -1622,11 +1963,19 @@ const TaxCalculationService = {
     const tdsAmount = Number(calculation.tds_amount ?? calculation.tdsAmount ?? userProfile.tds_amount ?? 0);
     const advanceTaxAmount = Number(calculation.advance_tax_amount ?? calculation.advanceTaxAmount ?? userProfile.advance_tax_amount ?? 0);
     const totalTaxCredits = this.roundMoney(tdsAmount + advanceTaxAmount);
-    const finalPayable = Number(calculation.final_payable ?? calculation.finalPayable ?? this.roundMoney(totalTaxPayable - totalTaxCredits));
+    const finalPayable = Math.max(0, Number(calculation.final_payable ?? calculation.finalPayable ?? this.roundMoney(totalTaxPayable - totalTaxCredits)));
+    const refundAmount = Math.max(0, Number(calculation.refund_amount ?? calculation.refundAmount ?? this.roundMoney(totalTaxCredits - totalTaxPayable)));
+
+    const incomeYear = getIncomeYearFromAssessmentYear(taxYear);
 
     return {
       ...calculation,
       taxYear,
+      tax_year: taxYear,
+      assessmentYear: taxYear,
+      assessment_year: taxYear,
+      incomeYear,
+      income_year: incomeYear,
       category,
       totalIncome,
       totalDeduction,
@@ -1639,8 +1988,22 @@ const TaxCalculationService = {
 
       salaryIncome,
       salaryExemption,
+      housePropertyIncome,
+      housePropertyDeduction,
+      businessIncome,
+      agricultureIncome,
+      agricultureDeduction,
+      capitalGainIncome,
+      otherIncome,
       totalDeductibleExpense,
       total_deductible_expense: totalDeductibleExpense,
+      house_property_income: housePropertyIncome,
+      house_property_deduction: housePropertyDeduction,
+      business_income: businessIncome,
+      agriculture_income: agricultureIncome,
+      agriculture_deduction: agricultureDeduction,
+      capital_gain_income: capitalGainIncome,
+      other_income: otherIncome,
       netTax,
       netWealth,
       hasMultipleMotorVehicles: hasMultipleMotorVehicles === 1,
@@ -1687,6 +2050,7 @@ const TaxCalculationService = {
       advance_tax_amount: advanceTaxAmount,
       total_tax_credits: totalTaxCredits,
       final_payable: finalPayable,
+      refund_amount: refundAmount,
 
       disabled_child_dependents: disabledChildDependents,
       disabled_child_additional_threshold: disabledChildAdditionalThreshold,
@@ -1731,6 +2095,167 @@ const TaxCalculationService = {
     return await this.enrichCalculations(calculations);
   },
 
+  // Synthesize progressive tax slabs on the fly when detailed rows are absent
+  // Strict Historical Integrity:
+  // 1. Use persisted slab details from linked tax return snapshot when available
+  // 2. Reconstruct missing slabs ONLY from saved calculation's own values and rules for its tax_year
+  // 3. NEVER use current taxpayer_profiles or unrelated current tax rules
+  // 4. Clearly flag synthesized records as is_synthesized: true
+  async synthesizeCalculationSlabs(calculation) {
+    if (!calculation) return [];
+
+    // 1. Check if linked return snapshot already has persisted slab details in tax_return_details
+    const calcId = calculation.id || calculation.tax_calculation_id;
+    if (calcId) {
+      const linkedReturnRows = await query(
+        `SELECT trd.id, trd.description, trd.amount, trd.metadata
+         FROM tax_return_details trd
+         JOIN tax_returns tr ON tr.id = trd.tax_return_id
+         WHERE tr.tax_calculation_id = ?
+           AND trd.section = 'TAX_CALCULATION'
+           AND trd.income_type = 'SLAB'
+         ORDER BY trd.id ASC`,
+        [calcId]
+      );
+
+      if (linkedReturnRows && linkedReturnRows.length > 0) {
+        return linkedReturnRows.map((row, idx) => {
+          let meta = {};
+          if (row.metadata) {
+            meta = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+          }
+          const slabOrder = meta.slab_order || meta.slabOrder || idx + 1;
+          const minInc = meta.minimum_income ?? meta.minimumIncome ?? 0;
+          const maxInc = meta.maximum_income ?? meta.maximumIncome ?? null;
+          return {
+            id: row.id,
+            slab_order: slabOrder,
+            slabOrder,
+            minimum_income: minInc,
+            minimumIncome: minInc,
+            maximum_income: maxInc,
+            maximumIncome: maxInc,
+            tax_rate: meta.tax_rate ?? meta.taxRate ?? 0,
+            taxRate: meta.tax_rate ?? meta.taxRate ?? 0,
+            taxable_amount: meta.taxable_amount ?? meta.taxableAmount ?? 0,
+            taxableAmount: meta.taxable_amount ?? meta.taxableAmount ?? 0,
+            calculated_tax: Number(row.amount || 0),
+            calculatedTax: Number(row.amount || 0),
+            description: row.description,
+            source: 'PERSISTED_RETURN_SNAPSHOT',
+            is_synthesized: false,
+            isSynthesized: false,
+          };
+        });
+      }
+    }
+
+    // 2. Reconstruct ONLY from the saved calculation's own values and historical rules for its tax_year
+    // NEVER query current taxpayer_profiles or unrelated current tax rules
+    const taxYear = calculation.tax_year || calculation.taxYear;
+    const taxableIncome = Number(calculation.taxable_income ?? calculation.taxableIncome ?? 0);
+    const category = calculation.category || "GENERAL";
+
+    let taxFreeThreshold = 375000;
+    if (taxYear && category) {
+      const thresholdRows = await query(
+        `SELECT tax_free_threshold FROM tax_thresholds WHERE tax_year = ? AND category = ? AND status = 'ACTIVE' LIMIT 1`,
+        [taxYear, category]
+      );
+      if (thresholdRows && thresholdRows.length > 0) {
+        taxFreeThreshold = this.roundMoney(thresholdRows[0].tax_free_threshold);
+      }
+    }
+
+    const taxRules = await query(
+      `SELECT id, minimum_income, maximum_income, tax_rate, fixed_amount
+       FROM tax_rules
+       WHERE tax_year = ? AND status = 'ACTIVE'
+       ORDER BY minimum_income ASC, id ASC`,
+      [taxYear]
+    );
+
+    if (!taxRules || taxRules.length === 0) return [];
+
+    const slabs = [];
+    const zeroRule = taxRules.find((rule) => Number(rule.tax_rate || 0) === 0);
+    const zeroTaxableAmount = this.roundMoney(Math.min(taxableIncome, taxFreeThreshold));
+
+    slabs.push({
+      tax_rule_id: zeroRule ? zeroRule.id : null,
+      taxRuleId: zeroRule ? zeroRule.id : null,
+      slab_order: 1,
+      slabOrder: 1,
+      minimum_income: 0,
+      minimumIncome: 0,
+      maximum_income: taxFreeThreshold,
+      maximumIncome: taxFreeThreshold,
+      tax_rate: 0,
+      taxRate: 0,
+      taxable_amount: zeroTaxableAmount,
+      taxableAmount: zeroTaxableAmount,
+      calculated_tax: 0,
+      calculatedTax: 0,
+      source: 'SYNTHESIZED_HISTORICAL_RULES',
+      is_synthesized: true,
+      isSynthesized: true,
+    });
+
+    if (taxableIncome > taxFreeThreshold) {
+      let currentPointer = taxFreeThreshold;
+
+      for (const rule of taxRules) {
+        const taxRate = Number(rule.tax_rate || 0);
+        if (taxRate <= 0) continue;
+        if (taxableIncome <= currentPointer) break;
+
+        const minIncome = Number(rule.minimum_income || 0);
+        const maxIncome =
+          rule.maximum_income === null || rule.maximum_income === undefined
+            ? null
+            : Number(rule.maximum_income);
+
+        const slabSpan = maxIncome !== null ? Math.max(0, maxIncome - minIncome) : null;
+        const slabStart = currentPointer;
+        const slabEnd = slabSpan !== null ? currentPointer + slabSpan : null;
+
+        const taxableAmount =
+          slabEnd !== null
+            ? this.roundMoney(Math.min(taxableIncome, slabEnd) - slabStart)
+            : this.roundMoney(taxableIncome - slabStart);
+
+        if (taxableAmount <= 0) continue;
+
+        const calculatedTax = this.roundMoney(taxableAmount * (taxRate / 100));
+
+        slabs.push({
+          tax_rule_id: rule.id,
+          taxRuleId: rule.id,
+          slab_order: slabs.length + 1,
+          slabOrder: slabs.length + 1,
+          minimum_income: slabStart + 1,
+          minimumIncome: slabStart + 1,
+          maximum_income: slabEnd,
+          maximumIncome: slabEnd,
+          tax_rate: taxRate,
+          taxRate: taxRate,
+          taxable_amount: taxableAmount,
+          taxableAmount: taxableAmount,
+          calculated_tax: calculatedTax,
+          calculatedTax: calculatedTax,
+          source: 'SYNTHESIZED_HISTORICAL_RULES',
+          is_synthesized: true,
+          isSynthesized: true,
+        });
+
+        currentPointer = slabEnd !== null ? slabEnd : taxableIncome;
+        if (taxableIncome <= currentPointer) break;
+      }
+    }
+
+    return slabs;
+  },
+
   // get single tax calculation with details
 
   async getCalculationById(id, userId) {
@@ -1747,7 +2272,10 @@ const TaxCalculationService = {
       return null;
     }
 
-    const details = await TaxCalculationDetailModel.getDetailsByCalculationId(id);
+    let details = await TaxCalculationDetailModel.getDetailsByCalculationId(id);
+    if (!details || details.length === 0) {
+      details = await this.synthesizeCalculationSlabs(calculation);
+    }
     return await this.enrichCalculation(calculation, details);
   },
 

@@ -222,7 +222,7 @@ const CalculationWorkflow = () => {
 
                     <div className="mt-6 space-y-3 pt-4 border-t border-slate-100">
                       {/* Formula Box */}
-                      <div className="rounded-lg bg-slate-50 p-2.5 text-[11px] font-mono text-slate-700 leading-snug border border-slate-100">
+                      <div className="rounded-lg bg-slate-50 p-2.5 text-[11px] font-medium text-slate-700 leading-snug border border-slate-100">
                         <span className="font-semibold text-slate-400 block mb-0.5 text-[10px] uppercase font-sans">
                           Formula / Logic:
                         </span>

@@ -3,6 +3,7 @@ const validator = require("validator");
 const jwt = require("jsonwebtoken");
 
 const UserModel = require("../models/UserModel");
+const TaxpayerProfileModel = require("../models/taxpayerProfileModel");
 
 const UserController = {
   async getUserByEmail(req, res) {
@@ -43,12 +44,28 @@ const UserController = {
 
   async registerUser(req, res) {
     try {
-      const { full_name, email, password, phone, nid } = req.body;
+      const { full_name, email, password, phone, nid, tin_number } = req.body;
 
       if (!full_name || !email || !password || !phone || !nid) {
         return res.status(400).json({
           success: false,
           message: "All fields are required.",
+        });
+      }
+
+      if (tin_number === undefined || tin_number === null || String(tin_number).trim() === "") {
+        return res.status(400).json({
+          success: false,
+          message: "e-TIN number is required.",
+        });
+      }
+
+      const cleanTin = String(tin_number).trim();
+      const tinRegex = /^[0-9]{12}$/;
+      if (!tinRegex.test(cleanTin)) {
+        return res.status(400).json({
+          success: false,
+          message: "e-TIN must contain exactly 12 digits.",
         });
       }
 
@@ -93,14 +110,24 @@ const UserController = {
         });
       }
 
+      const existingTin = await TaxpayerProfileModel.findByTin(cleanTin);
+
+      if (existingTin) {
+        return res.status(409).json({
+          success: false,
+          message: "This e-TIN number is already registered.",
+        });
+      }
+
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      await UserModel.create({
+      await UserModel.createWithProfile({
         full_name,
         email,
         password: hashedPassword,
         phone,
         nid,
+        tin_number: cleanTin,
       });
 
       return res.status(201).json({
@@ -108,6 +135,38 @@ const UserController = {
         message: "User registered successfully.",
       });
     } catch (error) {
+      if (error.code === "ER_DUP_ENTRY" || error.errno === 1062) {
+        const errorMsg = error.message || "";
+        if (errorMsg.includes("tin_number") || errorMsg.includes("uk_taxpayer_profiles_tin")) {
+          return res.status(409).json({
+            success: false,
+            message: "This e-TIN number is already registered.",
+          });
+        }
+        if (errorMsg.includes("email")) {
+          return res.status(409).json({
+            success: false,
+            message: "Email already exists.",
+          });
+        }
+        if (errorMsg.includes("phone")) {
+          return res.status(409).json({
+            success: false,
+            message: "Phone number already registered.",
+          });
+        }
+        if (errorMsg.includes("nid")) {
+          return res.status(409).json({
+            success: false,
+            message: "NID already registered.",
+          });
+        }
+        return res.status(409).json({
+          success: false,
+          message: "Duplicate entry conflict.",
+        });
+      }
+
       console.error("Register Error:", error);
 
       return res.status(500).json({

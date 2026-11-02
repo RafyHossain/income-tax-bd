@@ -15,11 +15,14 @@ const RegisterForm = () => {
     register,
     handleSubmit,
     watch,
+    setError,
     formState: {
       errors,
       isSubmitting,
     },
-  } = useForm();
+  } = useForm({
+    mode: "onTouched",
+  });
 
   const password = watch("password");
 
@@ -35,10 +38,35 @@ const RegisterForm = () => {
         replace: true,
       });
     } catch (error) {
-      toast.error(
-        error.response?.data?.message ||
-          "Registration Failed"
-      );
+      const serverMessage =
+        error.response?.data?.message || "Registration Failed";
+
+      if (
+        serverMessage.includes("e-TIN") ||
+        serverMessage.includes("tin_number")
+      ) {
+        setError("tin_number", {
+          type: "server",
+          message: serverMessage,
+        });
+      } else if (serverMessage.includes("Email")) {
+        setError("email", {
+          type: "server",
+          message: serverMessage,
+        });
+      } else if (serverMessage.includes("Phone")) {
+        setError("phone", {
+          type: "server",
+          message: serverMessage,
+        });
+      } else if (serverMessage.includes("NID")) {
+        setError("nid", {
+          type: "server",
+          message: serverMessage,
+        });
+      }
+
+      toast.error(serverMessage);
     }
   };
 
@@ -137,6 +165,40 @@ const RegisterForm = () => {
         )}
       </div>
 
+      {/* e-TIN Number (12 Digits) */}
+      <div>
+        <label className="mb-2 block text-sm font-medium text-slate-700">
+          e-TIN Number (12 Digits)
+        </label>
+
+        <Input
+          placeholder="Enter your 12-digit e-TIN"
+          inputMode="numeric"
+          maxLength={12}
+          {...register("tin_number", {
+            required: "e-TIN number is required.",
+            pattern: {
+              value: /^[0-9]{12}$/,
+              message: "e-TIN must contain exactly 12 digits.",
+            },
+            validate: {
+              exactLength: (val) =>
+                val?.trim()?.length === 12 ||
+                "e-TIN must contain exactly 12 digits.",
+              numericOnly: (val) =>
+                /^\d+$/.test(val?.trim() || "") ||
+                "e-TIN must contain numeric digits only.",
+            },
+          })}
+        />
+
+        {errors.tin_number && (
+          <p className="mt-2 text-sm text-red-500">
+            {errors.tin_number.message}
+          </p>
+        )}
+      </div>
+
       {/* Password */}
       <div>
         <label className="mb-2 block text-sm font-medium text-slate-700">
@@ -160,11 +222,9 @@ const RegisterForm = () => {
           placeholder="Confirm password"
           autoComplete="new-password"
           {...register("confirmPassword", {
-            required:
-              "Confirm password is required",
+            required: "Confirm password is required",
             validate: (value) =>
-              value === password ||
-              "Passwords do not match",
+              value === password || "Passwords do not match",
           })}
         />
 
@@ -181,9 +241,7 @@ const RegisterForm = () => {
         className="h-11 w-full"
         disabled={isSubmitting}
       >
-        {isSubmitting
-          ? "Creating..."
-          : "Create Account"}
+        {isSubmitting ? "Creating..." : "Create Account"}
       </Button>
     </form>
   );

@@ -29,6 +29,11 @@ const ProtectedRoute = ({ children }) => {
     );
   }
 
+  // Admin users have strict admin console access and no taxpayer view
+  if (user?.role?.toLowerCase() === "admin") {
+    return <Navigate to="/admin" replace />;
+  }
+
   return children;
 };
 

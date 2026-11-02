@@ -84,6 +84,14 @@ const AdminService = {
 
     return true;
   },
+
+  async getAllCalculations() {
+    return await AdminModel.getAllCalculations();
+  },
+
+  async getAuditLogs() {
+    return await AdminModel.getAuditLogs();
+  },
 };
 
 module.exports = AdminService;

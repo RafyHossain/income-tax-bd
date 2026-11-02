@@ -1,3 +1,4 @@
+const db = require("../database/query");
 const TaxThresholdModel = require("../models/taxThresholdModel");
 
 const TaxThresholdController = {
@@ -68,6 +69,13 @@ const TaxThresholdController = {
         return res.status(400).json({
           success: false,
           message: "tax_year, category, tax_free_threshold, and effective_from are required.",
+        });
+      }
+
+      if (Number(tax_free_threshold) < 0 || isNaN(Number(tax_free_threshold))) {
+        return res.status(400).json({
+          success: false,
+          message: "tax_free_threshold must be a non-negative number.",
         });
       }
 
@@ -142,14 +150,36 @@ const TaxThresholdController = {
     }
   },
 
-  // admin: delete threshold
+  // admin: delete threshold with historical protection
   async deleteThreshold(req, res) {
     try {
       const { id } = req.params;
+      const existing = await TaxThresholdModel.getThresholdById(id);
+      if (!existing) {
+        return res.status(404).json({
+          success: false,
+          message: "Tax threshold not found.",
+        });
+      }
+      const refCount = await db.query(
+        'SELECT COUNT(*) as count FROM tax_calculations WHERE tax_year = ? AND category = ?',
+        [existing.tax_year, existing.category]
+      );
+      if (Number(refCount[0]?.count || 0) > 0) {
+        await TaxThresholdModel.toggleStatus(id, 'INACTIVE');
+        return res.status(200).json({
+          success: true,
+          action: "DEACTIVATED",
+          message: "Tax threshold is referenced in historical calculations. It has been deactivated (status set to INACTIVE) to preserve historical records.",
+          data: { id, status: "INACTIVE" },
+        });
+      }
       await TaxThresholdModel.deleteThreshold(id);
       return res.status(200).json({
         success: true,
+        action: "DELETED",
         message: "Tax threshold deleted successfully.",
+        data: { id },
       });
     } catch (error) {
       console.error("Delete threshold error:", error);

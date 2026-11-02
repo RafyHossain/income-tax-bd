@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 const Navbar = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const isAdmin = user?.role?.toLowerCase() === "admin";
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleLogout = () => {
@@ -36,8 +37,14 @@ const Navbar = () => {
             >
               How It Works
             </a>
-            <NavItem to="/dashboard/tax-calculation">Tax Calculation</NavItem>
-            {user && <NavItem to="/dashboard">Dashboard</NavItem>}
+            {!isAdmin && (
+              <NavItem to="/dashboard/tax-calculation">Tax Calculation</NavItem>
+            )}
+            {user && (
+              <NavItem to={isAdmin ? "/admin" : "/dashboard"}>
+                {isAdmin ? "Admin Console" : "Dashboard"}
+              </NavItem>
+            )}
           </div>
         </nav>
 
@@ -99,20 +106,22 @@ const Navbar = () => {
             >
               How It Works
             </a>
-            <Link
-              to="/dashboard/tax-calculation"
-              onClick={() => setMobileMenuOpen(false)}
-              className="px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-lg"
-            >
-              Tax Calculation
-            </Link>
-            {user && (
+            {!isAdmin && (
               <Link
-                to="/dashboard"
+                to="/dashboard/tax-calculation"
                 onClick={() => setMobileMenuOpen(false)}
                 className="px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-lg"
               >
-                Dashboard
+                Tax Calculation
+              </Link>
+            )}
+            {user && (
+              <Link
+                to={isAdmin ? "/admin" : "/dashboard"}
+                onClick={() => setMobileMenuOpen(false)}
+                className="px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-lg"
+              >
+                {isAdmin ? "Admin Console" : "Dashboard"}
               </Link>
             )}
           </div>

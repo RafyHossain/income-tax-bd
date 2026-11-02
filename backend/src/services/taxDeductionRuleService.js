@@ -1,4 +1,5 @@
 const TaxDeductionRuleModel = require("../models/taxDeductionRuleModel");
+const db = require("../database/query");
 
 const TaxDeductionRuleService = {
   // constants
@@ -478,6 +479,27 @@ const TaxDeductionRuleService = {
     }
 
     return await this.deactivateDeductionRule(ruleId);
+  },
+  // delete deduction rule with historical protection
+  async deleteDeductionRule(ruleId) {
+    const existing = await TaxDeductionRuleModel.getRuleById(ruleId);
+    if (!existing) {
+      throw new Error('Tax deduction rule not found.');
+    }
+    const refCount = await db.query(
+      'SELECT COUNT(*) as count FROM tax_deductions WHERE tax_year = ? AND deduction_code = ?',
+      [existing.tax_year, existing.deduction_code]
+    );
+    if (Number(refCount[0]?.count || 0) > 0) {
+      await TaxDeductionRuleModel.updateDeductionRuleStatus(ruleId, 'INACTIVE');
+      return {
+        id: ruleId,
+        action: 'DEACTIVATED',
+        message: 'Tax deduction rule is referenced in taxpayer deduction records. It has been deactivated (status set to INACTIVE) to preserve historical records.',
+      };
+    }
+    await TaxDeductionRuleModel.deleteDeductionRule(ruleId);
+    return { id: ruleId, action: 'DELETED', message: 'Tax deduction rule deleted successfully.' };
   },
 };
 

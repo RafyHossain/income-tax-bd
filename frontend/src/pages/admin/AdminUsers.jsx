@@ -1,625 +1,322 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Users,
-  RefreshCw,
   ShieldCheck,
   UserRound,
-  XCircle,
   Trash2,
+  FileCheck2,
+  CreditCard,
+  Phone,
+  Mail,
+  Shield,
+  CheckCircle2,
+  AlertCircle,
+  HelpCircle,
 } from "lucide-react";
-
 import toast from "react-hot-toast";
 
 import AdminService from "@/services/adminService";
 import useAuth from "@/hooks/useAuth";
+import DataTable from "@/components/admin/DataTable";
+import StatusBadge from "@/components/admin/StatusBadge";
+import ConfirmDialog from "@/components/admin/ConfirmDialog";
+import LoadingState from "@/components/admin/LoadingState";
+import ErrorState from "@/components/admin/ErrorState";
 
 const AdminUsers = () => {
   const { user: currentUser } = useAuth();
-
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
 
-  const [updatingUserId, setUpdatingUserId] =
-    useState(null);
-
-  const [deletingUserId, setDeletingUserId] =
-    useState(null);
-
-  const [deleteUser, setDeleteUser] =
-    useState(null);
-
-  // load users
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const loadUsers = async () => {
     try {
       setLoading(true);
       setError("");
-
-      const response =
-        await AdminService.getAllUsers();
-
-      setUsers(response.data || []);
-    } catch (error) {
-      console.error(
-        "Admin users error:",
-        error,
-      );
-
-      setError(
-        error?.response?.data?.message ||
-          error?.message ||
-          "Failed to load users.",
-      );
+      const res = await AdminService.getAllUsers();
+      if (res?.success) {
+        setUsers(res.data || []);
+      } else {
+        throw new Error(res?.message || "Failed to load users.");
+      }
+    } catch (err) {
+      console.error("Admin users error:", err);
+      setError(err?.response?.data?.message || err?.message || "Failed to load users.");
     } finally {
       setLoading(false);
     }
   };
 
-
   useEffect(() => {
-    let cancelled = false;
-
-    AdminService.getAllUsers()
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-
-        setUsers(response?.data || []);
-        setError("");
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-
-        console.error(
-          "Admin users error:",
-          error,
-        );
-
-        setUsers([]);
-
-        setError(
-          error?.response?.data?.message ||
-            error?.message ||
-            "Failed to load users.",
-        );
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    loadUsers();
   }, []);
 
-  // role change
+  const handleToggleRole = (targetUser) => {
+    const nextRole = targetUser.role === "admin" ? "user" : "admin";
+    const isSelf = Number(targetUser.id) === Number(currentUser?.id);
 
-  const handleRoleChange = async (
-    userId,
-    newRole,
-  ) => {
-    try {
-      setUpdatingUserId(userId);
-
-      const response =
-        await AdminService.updateUserRole(
-          userId,
-          newRole,
-        );
-
-      setUsers((currentUsers) =>
-        currentUsers.map((user) =>
-          user.id === userId
-            ? response.data
-            : user,
-        ),
-      );
-
-      toast.success(
-        "User role updated successfully.",
-      );
-    } catch (error) {
-      console.error(
-        "Update user role error:",
-        error,
-      );
-
-      toast.error(
-        error?.response?.data?.message ||
-          error?.message ||
-          "Failed to update user role.",
-      );
-    } finally {
-      setUpdatingUserId(null);
-    }
-  };
-
-  // delete user
-
-  const handleDeleteUser = async () => {
-    if (!deleteUser) {
+    if (isSelf) {
+      toast.error("You cannot change your own administrator role.");
       return;
     }
 
-    try {
-      setDeletingUserId(deleteUser.id);
-
-      await AdminService.deleteUser(
-        deleteUser.id,
-      );
-
-      setUsers((currentUsers) =>
-        currentUsers.filter(
-          (user) =>
-            user.id !== deleteUser.id,
-        ),
-      );
-
-      toast.success(
-        "User deleted successfully.",
-      );
-
-      setDeleteUser(null);
-    } catch (error) {
-      console.error(
-        "Delete user error:",
-        error,
-      );
-
-      toast.error(
-        error?.response?.data?.message ||
-          error?.message ||
-          "Failed to delete user.",
-      );
-    } finally {
-      setDeletingUserId(null);
-    }
-  };
-
-  // format date
-
-  const formatDate = (date) => {
-    if (!date) {
-      return "-";
-    }
-
-    return new Date(date).toLocaleDateString(
-      "en-GB",
-      {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
+    setConfirmDialog({
+      title: `${nextRole === "admin" ? "Promote to Admin" : "Demote to Standard User"}`,
+      message: `Are you sure you want to change ${targetUser.full_name}'s role from ${targetUser.role} to ${nextRole}?`,
+      variant: nextRole === "admin" ? "primary" : "warning",
+      confirmText: `Set as ${nextRole.toUpperCase()}`,
+      onConfirm: async () => {
+        try {
+          setActionLoading(true);
+          const res = await AdminService.updateUserRole(targetUser.id, nextRole);
+          toast.success(res?.message || `User role updated to ${nextRole}.`);
+          setConfirmDialog(null);
+          loadUsers();
+        } catch (err) {
+          console.error(err);
+          toast.error(err?.response?.data?.message || err?.message || "Failed to update role.");
+        } finally {
+          setActionLoading(false);
+        }
       },
-    );
+    });
   };
 
-  // loading
+  const handleDeleteUser = (targetUser) => {
+    const isSelf = Number(targetUser.id) === Number(currentUser?.id);
+    if (isSelf) {
+      toast.error("You cannot delete your own account while logged in.");
+      return;
+    }
 
-  if (loading) {
-    return (
-      <div className="flex min-h-[400px] items-center justify-center">
-        <div className="text-center">
-          <RefreshCw className="mx-auto h-7 w-7 animate-spin text-slate-500" />
+    setConfirmDialog({
+      title: "Delete User Account",
+      message: `Are you sure you want to permanently delete ${targetUser.full_name} (${targetUser.email})? All associated income, expenses, and calculation simulations will be removed.`,
+      variant: "danger",
+      confirmText: "Delete Account",
+      onConfirm: async () => {
+        try {
+          setActionLoading(true);
+          const res = await AdminService.deleteUser(targetUser.id);
+          toast.success(res?.message || "User account deleted successfully.");
+          setConfirmDialog(null);
+          loadUsers();
+        } catch (err) {
+          console.error(err);
+          toast.error(err?.response?.data?.message || err?.message || "Failed to delete user.");
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
+  };
 
-          <p className="mt-3 text-sm text-slate-500">
-            Loading users...
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const filteredUsers = users.filter((u) => {
+    return !roleFilter || u.role === roleFilter;
+  });
 
-  // error
-
-  if (error) {
-    return (
-      <div className="flex min-h-[400px] items-center justify-center">
-        <div className="w-full max-w-md rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
-          <XCircle className="mx-auto h-8 w-8 text-red-600" />
-
-          <h2 className="mt-3 text-lg font-semibold text-red-800">
-            Unable to load users
-          </h2>
-
-          <p className="mt-2 text-sm text-red-700">
-            {error}
-          </p>
-
-          <button
-            type="button"
-            onClick={loadUsers}
-            className="mt-5 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm shadow-emerald-600/20 transition hover:bg-emerald-700"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Try Again
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // main ui
-
-  return (
-    <div className="space-y-8">
-
-      {/* =====================================================
-          HEADER
-      ====================================================== */}
-
-      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-        <div>
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <Users className="h-4 w-4" />
-
-            <span>
-              Administration
-            </span>
+  const columns = [
+    {
+      title: "Taxpayer Identity",
+      key: "full_name",
+      render: (val, row) => (
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 font-bold text-xs border border-slate-200">
+            {val
+              ?.split(" ")
+              .map((n) => n[0])
+              .join("")
+              .slice(0, 2)
+              .toUpperCase()}
           </div>
-
-          <h1 className="mt-2 text-3xl font-semibold text-slate-900">
-            User Management
-          </h1>
-
-          <p className="mt-2 text-slate-500">
-            Manage registered users and their system roles.
-          </p>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-slate-900 text-sm">{val}</span>
+              {Number(row.id) === Number(currentUser?.id) && (
+                <span className="rounded-md bg-emerald-50 px-1.5 py-0.2 text-[10px] font-bold text-emerald-700 border border-emerald-200">
+                  You
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-400">User ID: #{row.id}</p>
+          </div>
         </div>
-
-        <button
-          type="button"
-          onClick={loadUsers}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </button>
-      </div>
-
-      {/* =====================================================
-          SUMMARY
-      ====================================================== */}
-
-      <div className="grid gap-5 md:grid-cols-3">
-
-        {/* Total Users */}
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">
-            Total Users
-          </p>
-
-          <p className="mt-2 text-3xl font-semibold text-slate-900">
-            {users.length}
-          </p>
+      ),
+    },
+    {
+      title: "Contact Info",
+      key: "email",
+      render: (val, row) => (
+        <div className="text-xs space-y-0.5">
+          <div className="flex items-center gap-1.5 text-slate-700">
+            <Mail className="h-3 w-3 text-slate-400" />
+            <span>{val}</span>
+          </div>
+          {row.phone && (
+            <div className="flex items-center gap-1.5 text-slate-500">
+              <Phone className="h-3 w-3 text-slate-400" />
+              <span>{row.phone}</span>
+            </div>
+          )}
         </div>
-
-        {/* Administrators */}
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">
-            Administrators
-          </p>
-
-          <p className="mt-2 text-3xl font-semibold text-slate-900">
-            {
-              users.filter(
-                (user) =>
-                  user.role === "admin",
-              ).length
-            }
-          </p>
+      ),
+    },
+    {
+      title: "NID & e-TIN",
+      key: "tin_number",
+      render: (val, row) => (
+        <div className="text-xs space-y-1">
+          {val ? (
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                TIN: {val}
+              </span>
+            </div>
+          ) : (
+            <span className="text-slate-400 font-mono text-[11px]">No e-TIN</span>
+          )}
+          {row.nid && <p className="text-slate-500 font-mono text-[10px]">NID: {row.nid}</p>}
         </div>
-
-        {/* Regular Users */}
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">
-            Regular Users
-          </p>
-
-          <p className="mt-2 text-3xl font-semibold text-slate-900">
-            {
-              users.filter(
-                (user) =>
-                  user.role === "user",
-              ).length
-            }
-          </p>
-        </div>
-
-      </div>
-
-      {/* =====================================================
-          USERS TABLE
-      ====================================================== */}
-
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-
-        <div className="border-b border-slate-200 px-6 py-5">
-          <h2 className="text-lg font-semibold text-slate-900">
-            All Users
-          </h2>
-
-          <p className="mt-1 text-sm text-slate-500">
-            Registered accounts in the system.
-          </p>
-        </div>
-
-        {users.length === 0 ? (
-          <div className="px-6 py-16 text-center">
-            <Users className="mx-auto h-10 w-10 text-slate-300" />
-
-            <p className="mt-3 text-slate-500">
-              No users found.
+      ),
+    },
+    {
+      title: "Filing Status",
+      key: "filing_history_status",
+      render: (val, row) => {
+        const isVerified = row.filing_history_verified === 1;
+        return (
+          <div className="text-xs space-y-0.5">
+            <div className="flex items-center gap-1">
+              {isVerified ? (
+                <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 border border-emerald-200">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Verified
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500 border border-slate-200">
+                  <HelpCircle className="h-3 w-3" />
+                  Unverified
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-500 font-medium">
+              {val ? val.replace(/_/g, " ") : "No profile record"}
             </p>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-
-            <table className="min-w-full">
-
-              <thead className="border-b border-slate-200 bg-slate-50">
-                <tr>
-
-                  <th className="whitespace-nowrap px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    User
-                  </th>
-
-                  <th className="whitespace-nowrap px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Contact
-                  </th>
-
-                  <th className="whitespace-nowrap px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Role
-                  </th>
-
-                  <th className="whitespace-nowrap px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Created
-                  </th>
-
-                  <th className="whitespace-nowrap px-5 py-4 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Action
-                  </th>
-
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-slate-100">
-
-                {users.map((user) => {
-                  const isCurrentUser =
-                    Number(user.id) ===
-                    Number(currentUser?.id);
-
-                  const isUpdating =
-                    updatingUserId ===
-                    user.id;
-
-                  const isDeleting =
-                    deletingUserId ===
-                    user.id;
-
-                  return (
-                    <tr
-                      key={user.id}
-                      className="transition hover:bg-slate-50"
-                    >
-
-                      {/* USER */}
-
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100">
-                            <UserRound className="h-5 w-5 text-slate-600" />
-                          </div>
-
-                          <div>
-                            <p className="font-medium text-slate-900">
-                              {user.full_name}
-                            </p>
-
-                            <p className="text-xs text-slate-400">
-                              ID: {user.id}
-                            </p>
-                          </div>
-
-                        </div>
-                      </td>
-
-                      {/* CONTACT */}
-
-                      <td className="px-5 py-4">
-                        <p className="text-sm text-slate-700">
-                          {user.email}
-                        </p>
-
-                        <p className="mt-1 text-xs text-slate-400">
-                          {user.phone || "-"}
-                        </p>
-                      </td>
-
-                      {/* ROLE */}
-
-                      <td className="px-5 py-4">
-
-                        {user.role === "admin" ? (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                            <ShieldCheck className="h-3.5 w-3.5" />
-                            Admin
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                            <UserRound className="h-3.5 w-3.5" />
-                            User
-                          </span>
-                        )}
-
-                      </td>
-
-                      {/* CREATED */}
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">
-                        {formatDate(
-                          user.created_at,
-                        )}
-                      </td>
-
-                      {/* ACTION */}
-
-                      <td className="px-5 py-4">
-
-                        {isCurrentUser ? (
-                          <span className="block text-right text-xs text-slate-400">
-                            Current account
-                          </span>
-                        ) : (
-                          <div className="flex items-center justify-end gap-2">
-
-                            <select
-                              value={user.role}
-                              disabled={
-                                isUpdating ||
-                                isDeleting
-                              }
-                              onChange={(event) =>
-                                handleRoleChange(
-                                  user.id,
-                                  event.target.value,
-                                )
-                              }
-                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <option value="user">
-                                User
-                              </option>
-
-                              <option value="admin">
-                                Admin
-                              </option>
-                            </select>
-
-                            <button
-                              type="button"
-                              disabled={
-                                isUpdating ||
-                                isDeleting
-                              }
-                              onClick={() =>
-                                setDeleteUser(
-                                  user,
-                                )
-                              }
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <Trash2 className="h-4 w-4" />
-
-                              {isDeleting
-                                ? "Deleting..."
-                                : "Delete"}
-                            </button>
-
-                          </div>
-                        )}
-
-                      </td>
-
-                    </tr>
-                  );
-                })}
-
-              </tbody>
-
-            </table>
-
+        );
+      },
+    },
+    {
+      title: "System Role",
+      key: "role",
+      render: (val) => <StatusBadge status={val} />,
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      align: "right",
+      render: (_, row) => {
+        const isSelf = Number(row.id) === Number(currentUser?.id);
+        return (
+          <div className="flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              disabled={isSelf}
+              onClick={() => handleToggleRole(row)}
+              title={row.role === "admin" ? "Demote to User" : "Promote to Admin"}
+              className={`rounded-lg p-1.5 transition ${
+                isSelf
+                  ? "text-slate-300 cursor-not-allowed"
+                  : "text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
+              }`}
+            >
+              <Shield className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              disabled={isSelf}
+              onClick={() => handleDeleteUser(row)}
+              title={isSelf ? "Cannot delete self" : "Delete User"}
+              className={`rounded-lg p-1.5 transition ${
+                isSelf
+                  ? "text-slate-300 cursor-not-allowed"
+                  : "text-slate-400 hover:text-red-600 hover:bg-red-50"
+              }`}
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
           </div>
-        )}
+        );
+      },
+    },
+  ];
 
-      </section>
+  if (loading && users.length === 0) {
+    return <LoadingState message="Loading users & taxpayer profiles..." />;
+  }
 
-      {/* =====================================================
-          DELETE CONFIRMATION MODAL
-      ====================================================== */}
+  if (error && users.length === 0) {
+    return <ErrorState message={error} onRetry={loadUsers} />;
+  }
 
-      {deleteUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-
-            <div className="flex items-start gap-4">
-
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-red-100">
-                <Trash2 className="h-5 w-5 text-red-600" />
-              </div>
-
-              <div>
-
-                <h3 className="text-lg font-semibold text-slate-900">
-                  Delete User?
-                </h3>
-
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Are you sure you want to delete{" "}
-                  <span className="font-semibold text-slate-700">
-                    {deleteUser.full_name}
-                  </span>
-                  ?
-                </p>
-
-                <p className="mt-2 text-sm leading-6 text-red-600">
-                  This action will permanently delete
-                  this user's account and all
-                  user-owned data.
-                </p>
-
-              </div>
-
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3">
-
-              <button
-                type="button"
-                disabled={
-                  deletingUserId !== null
-                }
-                onClick={() =>
-                  setDeleteUser(null)
-                }
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                disabled={
-                  deletingUserId !== null
-                }
-                onClick={handleDeleteUser}
-                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Trash2 className="h-4 w-4" />
-
-                {deletingUserId !== null
-                  ? "Deleting..."
-                  : "Delete User"}
-              </button>
-
-            </div>
-
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <Users className="h-4 w-4 text-emerald-600" />
+            <span>Taxpayer Directory & Access Control</span>
           </div>
-
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
+            User & Taxpayer Management
+          </h1>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Manage system accounts, administrator privileges, and authoritative return-filing verification statuses.
+          </p>
         </div>
-      )}
+      </div>
 
+      {/* Filter Bar */}
+      <div className="flex flex-col sm:flex-row items-center gap-3">
+        <select
+          value={roleFilter}
+          onChange={(e) => setRoleFilter(e.target.value)}
+          className="w-full sm:w-48 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-emerald-500 focus:outline-none"
+        >
+          <option value="">All Roles</option>
+          <option value="admin">Administrators</option>
+          <option value="user">Standard Taxpayers</option>
+        </select>
+        <span className="ml-auto text-xs font-medium text-slate-500">
+          Showing {filteredUsers.length} of {users.length} accounts
+        </span>
+      </div>
+
+      {/* Table */}
+      <DataTable
+        columns={columns}
+        data={filteredUsers}
+        loading={loading}
+        emptyTitle="No users found"
+        emptyDescription="No registered users found."
+      />
+
+      {/* Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!confirmDialog}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        variant={confirmDialog?.variant}
+        confirmText={confirmDialog?.confirmText}
+        loading={actionLoading}
+        onConfirm={confirmDialog?.onConfirm}
+        onClose={() => setConfirmDialog(null)}
+      />
     </div>
   );
 };

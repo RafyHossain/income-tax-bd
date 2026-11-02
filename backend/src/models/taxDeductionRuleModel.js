@@ -314,8 +314,18 @@ const TaxDeductionRuleModel = {
         ]);
 
         return rows[0] || null;
-    }
+    },
 
+    // delete deduction rule
+    async deleteDeductionRule(id) {
+        const sql = 'DELETE FROM tax_deduction_rules WHERE id = ?';
+        return await db.query(sql, [id]);
+    },
+    // get rule by id alias
+    async getRuleById(id) {
+        const rows = await this.getDeductionRuleById(id);
+        return Array.isArray(rows) ? (rows[0] || null) : rows;
+    },
 };
 
 module.exports = TaxDeductionRuleModel;

@@ -6,13 +6,13 @@ import {
   Pencil,
   X,
   Power,
-  Search,
   Trash2,
   TrendingUp,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
 import AdminTaxRebateRuleService from "@/services/adminTaxRebateRuleService";
+import { formatTaxYearLabel } from "@/utils/taxYearUtils";
 
 const emptyForm = {
   tax_year: "2026-27",
@@ -60,11 +60,10 @@ const PRESET_REBATE_RULES = [
 
 const AdminTaxRebateRules = () => {
   const [rules, setRules] = useState([]);
-  const [taxYears, setTaxYears] = useState(["2026-27", "2025-26", "2024-25"]);
+  const [taxYears, setTaxYears] = useState([]);
 
   const [selectedTaxYear, setSelectedTaxYear] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -97,7 +96,6 @@ const AdminTaxRebateRules = () => {
       const filters = {};
       if (selectedTaxYear) filters.tax_year = selectedTaxYear;
       if (selectedStatus) filters.status = selectedStatus;
-      if (searchTerm.trim()) filters.search = searchTerm.trim();
 
       const res = await AdminTaxRebateRuleService.getAllRules(filters);
       setRules(res?.data || []);
@@ -117,11 +115,6 @@ const AdminTaxRebateRules = () => {
   useEffect(() => {
     loadRules();
   }, [selectedTaxYear, selectedStatus]);
-
-  const handleSearch = (e) => {
-    e.preventDefault();
-    loadRules();
-  };
 
   const handleOpenCreate = () => {
     setEditingRule(null);
@@ -243,7 +236,7 @@ const AdminTaxRebateRules = () => {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-lg shadow-emerald-600/20">
-            <ShieldCheck className="h-5 w-5" />
+            <TrendingUp className="h-5 w-5" />
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900">
@@ -253,15 +246,6 @@ const AdminTaxRebateRules = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={loadRules}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-900"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
           <button
             type="button"
             onClick={handleOpenCreate}
@@ -275,7 +259,7 @@ const AdminTaxRebateRules = () => {
 
       {/* Filter Toolbar */}
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="text-xs font-medium text-slate-600">Tax Year</label>
             <select
@@ -285,7 +269,7 @@ const AdminTaxRebateRules = () => {
             >
               <option value="">All Tax Years</option>
               {taxYears.map((year) => (
-                <option key={year} value={year}>{year}</option>
+                <option key={year} value={year}>{formatTaxYearLabel(year)}</option>
               ))}
             </select>
           </div>
@@ -301,25 +285,6 @@ const AdminTaxRebateRules = () => {
               <option value="ACTIVE">ACTIVE</option>
               <option value="INACTIVE">INACTIVE</option>
             </select>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-slate-600">Search</label>
-            <form onSubmit={handleSearch} className="mt-1 relative flex">
-              <input
-                type="text"
-                placeholder="Search code or name..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-              />
-              <button
-                type="submit"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <Search className="h-4 w-4" />
-              </button>
-            </form>
           </div>
         </div>
       </div>
@@ -477,15 +442,19 @@ const AdminTaxRebateRules = () => {
                   <label className="text-xs font-medium text-slate-700">
                     Tax Year <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
+                  <select
                     name="tax_year"
                     value={form.tax_year}
                     onChange={handleFormChange}
-                    placeholder="e.g. 2026-27"
                     required
-                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-slate-400 focus:outline-none"
-                  />
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-slate-400 focus:outline-none"
+                  >
+                    {taxYears.map((year) => (
+                      <option key={year} value={year}>
+                        {formatTaxYearLabel(year)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>

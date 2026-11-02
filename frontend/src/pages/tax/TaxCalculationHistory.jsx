@@ -2,18 +2,16 @@ import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router";
 import toast from "react-hot-toast";
 import TaxCalculationService from "@/services/taxCalculationService";
+import { getIncomeYearFromAssessmentYear, formatTaxYearLabel } from "@/utils/taxYearUtils";
 import {
   Eye,
   FileText,
   Loader2,
-  RefreshCw,
   AlertCircle,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  Search,
-  X,
   Trash2,
 } from "lucide-react";
 
@@ -83,7 +81,6 @@ const TaxCalculationHistory = ({
 
   // Filter states
   const [taxYearFilter, setTaxYearFilter] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
 
   // Delete states
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -143,25 +140,14 @@ const TaxCalculationHistory = ({
   const filteredCalculations = useMemo(() => {
     return rawCalculations.filter((item) => {
       const year = String(item.taxYear ?? item.tax_year ?? "");
-      const category = String(item.category ?? "");
 
       if (taxYearFilter && year !== taxYearFilter) {
         return false;
       }
 
-      if (searchTerm.trim()) {
-        const query = searchTerm.trim().toLowerCase();
-        const matchYear = year.toLowerCase().includes(query);
-        const matchCat = category.toLowerCase().includes(query);
-        const matchFormattedCat = formatCategory(category).toLowerCase().includes(query);
-        if (!matchYear && !matchCat && !matchFormattedCat) {
-          return false;
-        }
-      }
-
       return true;
     });
-  }, [rawCalculations, taxYearFilter, searchTerm]);
+  }, [rawCalculations, taxYearFilter]);
 
   // Pagination calculations
   const totalItems = filteredCalculations.length;
@@ -178,14 +164,8 @@ const TaxCalculationHistory = ({
     setCurrentPage(1);
   };
 
-  const handleSearchChange = (e) => {
-    setSearchTerm(e.target.value);
-    setCurrentPage(1);
-  };
-
   const handleClearFilters = () => {
     setTaxYearFilter("");
-    setSearchTerm("");
     setCurrentPage(1);
   };
 
@@ -275,16 +255,6 @@ const TaxCalculationHistory = ({
             </p>
           </div>
         </div>
-
-        <button
-          type="button"
-          onClick={loadHistory}
-          disabled={isLoading}
-          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
       </div>
 
       {/* =================================================
@@ -292,52 +262,23 @@ const TaxCalculationHistory = ({
       ================================================= */}
       {rawCalculations.length > 0 && (
         <div className="border-b border-slate-100 bg-slate-50/50 p-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <div>
-              <label className="text-xs font-medium text-slate-600">Tax Year</label>
-              <select
-                value={taxYearFilter}
-                onChange={handleTaxYearChange}
-                className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-              >
-                <option value="">All Tax Years</option>
-                {availableTaxYears.map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="sm:col-span-1 lg:col-span-2">
-              <label className="text-xs font-medium text-slate-600">Search</label>
-              <div className="relative mt-1 flex items-center">
-                <input
-                  type="text"
-                  placeholder="Search by category or tax year..."
-                  value={searchTerm}
-                  onChange={handleSearchChange}
-                  className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none"
-                />
-                {searchTerm ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchTerm("");
-                      setCurrentPage(1);
-                    }}
-                    className="absolute right-2 text-slate-400 hover:text-slate-600"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                ) : (
-                  <Search className="pointer-events-none absolute right-2.5 h-4 w-4 text-slate-400" />
-                )}
-              </div>
-            </div>
+          <div className="max-w-xs">
+            <label className="text-xs font-medium text-slate-600">Tax Year</label>
+            <select
+              value={taxYearFilter}
+              onChange={handleTaxYearChange}
+              className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
+            >
+              <option value="">All Tax Years</option>
+              {availableTaxYears.map((year) => (
+                <option key={year} value={year}>
+                  {formatTaxYearLabel(year)}
+                </option>
+              ))}
+            </select>
           </div>
 
-          {(taxYearFilter || searchTerm) && (
+          {taxYearFilter && (
             <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
               <span>
                 Found <span className="font-semibold text-slate-800">{totalItems}</span> matching records
@@ -347,7 +288,7 @@ const TaxCalculationHistory = ({
                 onClick={handleClearFilters}
                 className="font-medium text-emerald-600 hover:text-emerald-700"
               >
-                Clear Filters
+                Clear Filter
               </button>
             </div>
           )}
@@ -437,7 +378,10 @@ const TaxCalculationHistory = ({
                     </td>
 
                     <td className="px-5 py-4 text-sm font-medium text-slate-900">
-                      {taxYear}
+                      <div>AY {taxYear}</div>
+                      <div className="text-[10px] text-slate-400">
+                        IY {getIncomeYearFromAssessmentYear(taxYear)}
+                      </div>
                     </td>
 
                     <td className="px-5 py-4 text-sm text-slate-600">

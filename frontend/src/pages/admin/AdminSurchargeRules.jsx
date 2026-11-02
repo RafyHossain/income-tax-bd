@@ -1,20 +1,17 @@
 import { useEffect, useState } from "react";
 import {
-  ShieldCheck,
+  Coins,
   Plus,
   RefreshCw,
   Pencil,
   X,
   Power,
-  Search,
   Trash2,
-  TrendingUp,
-  Coins,
-  AlertTriangle,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
 import AdminSurchargeRuleService from "@/services/adminSurchargeRuleService";
+import { formatTaxYearLabel } from "@/utils/taxYearUtils";
 
 const emptyForm = {
   tax_year: "2026-27",
@@ -62,11 +59,10 @@ const PRESET_SURCHARGE_RULES = [
 
 const AdminSurchargeRules = () => {
   const [rules, setRules] = useState([]);
-  const [taxYears, setTaxYears] = useState(["2026-27", "2025-26", "2024-25", "2023-24"]);
+  const [taxYears, setTaxYears] = useState([]);
 
   const [selectedTaxYear, setSelectedTaxYear] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -99,7 +95,6 @@ const AdminSurchargeRules = () => {
       const filters = {};
       if (selectedTaxYear) filters.tax_year = selectedTaxYear;
       if (selectedStatus) filters.status = selectedStatus;
-      if (searchTerm.trim()) filters.search = searchTerm.trim();
 
       const res = await AdminSurchargeRuleService.getAllRules(filters);
       setRules(res?.data || []);
@@ -119,11 +114,6 @@ const AdminSurchargeRules = () => {
   useEffect(() => {
     loadRules();
   }, [selectedTaxYear, selectedStatus]);
-
-  const handleSearchSubmit = (e) => {
-    e.preventDefault();
-    loadRules();
-  };
 
   const handleOpenAdd = () => {
     setEditingRule(null);
@@ -220,23 +210,16 @@ const AdminSurchargeRules = () => {
     }
   };
 
-  const handleDelete = (rule) => {
-    setConfirmDialog({
-      title: "Delete Surcharge Rule?",
-      message: `Are you sure you want to delete "${rule.rule_name}" for tax year ${rule.tax_year}? This cannot be undone.`,
-      onConfirm: async () => {
-        try {
-          await AdminSurchargeRuleService.deleteRule(rule.id);
-          toast.success("Surcharge rule deleted successfully!");
-          loadRules();
-        } catch (err) {
-          console.error("Delete rule error:", err);
-          toast.error(err?.response?.data?.message || "Failed to delete surcharge rule.");
-        } finally {
-          setConfirmDialog(null);
-        }
-      },
-    });
+  const handleDelete = async (rule) => {
+    try {
+      await AdminSurchargeRuleService.deleteRule(rule.id);
+      toast.success("Surcharge rule deleted successfully!");
+      setConfirmDialog(null);
+      loadRules();
+    } catch (err) {
+      console.error("Delete rule error:", err);
+      toast.error(err?.response?.data?.message || "Failed to delete surcharge rule.");
+    }
   };
 
   const formatCurrency = (val) => {
@@ -263,16 +246,6 @@ const AdminSurchargeRules = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => {
-              loadRules();
-              loadTaxYears();
-            }}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-900"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-          <button
             onClick={handleOpenAdd}
             className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
           >
@@ -284,7 +257,7 @@ const AdminSurchargeRules = () => {
 
       {/* Filter Toolbar */}
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="text-xs font-medium text-slate-600">Tax Year</label>
             <select
@@ -295,7 +268,7 @@ const AdminSurchargeRules = () => {
               <option value="">All Tax Years</option>
               {taxYears.map((year) => (
                 <option key={year} value={year}>
-                  {year}
+                  {formatTaxYearLabel(year)}
                 </option>
               ))}
             </select>
@@ -313,25 +286,6 @@ const AdminSurchargeRules = () => {
               <option value="INACTIVE">INACTIVE</option>
             </select>
           </div>
-
-          <div>
-            <label className="text-xs font-medium text-slate-600">Search</label>
-            <form onSubmit={handleSearchSubmit} className="mt-1 relative flex">
-              <input
-                type="text"
-                placeholder="Search code or name..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-              />
-              <button
-                type="submit"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <Search className="h-4 w-4" />
-              </button>
-            </form>
-          </div>
         </div>
       </div>
 
@@ -342,86 +296,87 @@ const AdminSurchargeRules = () => {
         </div>
       )}
 
-      {/* Rules Table */}
+      {/* Surcharge Rules Table */}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase font-semibold text-slate-600">
               <tr>
-                <th className="px-4 py-3.5">Tax Year</th>
-                <th className="px-4 py-3.5">Surcharge Bracket / Rule Name</th>
-                <th className="px-4 py-3.5">Wealth Range</th>
-                <th className="px-4 py-3.5">Surcharge Rate</th>
-                <th className="px-4 py-3.5">Status</th>
-                <th className="px-4 py-3.5">Effective Date</th>
-                <th className="px-4 py-3.5 text-right">Actions</th>
+                <th className="px-4 py-3">Tax Year</th>
+                <th className="px-4 py-3">Surcharge Bracket / Rule Name</th>
+                <th className="px-4 py-3">Wealth Range</th>
+                <th className="px-4 py-3 text-right">Surcharge Rate</th>
+                <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
+            <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
-                    <RefreshCw className="mx-auto mb-2 h-6 w-6 animate-spin text-purple-600" />
-                    Loading wealth surcharge rules...
+                  <td colSpan="6" className="py-12 text-center text-slate-500">
+                    <RefreshCw className="mx-auto h-6 w-6 animate-spin text-slate-400" />
+                    <p className="mt-2 text-sm">Loading wealth surcharge rules...</p>
                   </td>
                 </tr>
               ) : rules.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
-                    No surcharge rules found for the selected criteria.
+                  <td colSpan="6" className="py-12 text-center text-slate-500">
+                    <Coins className="mx-auto h-8 w-8 text-slate-300" />
+                    <p className="mt-2 text-sm font-medium text-slate-700">No surcharge rules found</p>
+                    <p className="text-xs text-slate-400">Click &ldquo;Add Surcharge Slab&rdquo; to configure wealth surcharge.</p>
                   </td>
                 </tr>
               ) : (
                 rules.map((rule) => (
-                  <tr key={rule.id} className="transition-colors hover:bg-slate-50/70">
-                    <td className="px-4 py-3.5 font-semibold text-slate-900">
-                      AY {rule.tax_year}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <div className="font-medium text-slate-900">{rule.rule_name}</div>
-                    </td>
-                    <td className="px-4 py-3.5 text-xs text-slate-600">
+                  <tr key={rule.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="px-4 py-3 font-semibold text-slate-900">{rule.tax_year}</td>
+                    <td className="px-4 py-3 font-medium text-slate-900">{rule.rule_name}</td>
+                    <td className="px-4 py-3 text-xs text-slate-600">
                       <span className="font-semibold text-slate-900">{formatCurrency(rule.minimum_wealth)}</span>
                       {" to "}
                       <span className="font-semibold text-slate-900">{formatCurrency(rule.maximum_wealth)}</span>
                     </td>
-                    <td className="px-4 py-3.5 font-semibold text-slate-900">
+                    <td className="px-4 py-3 text-right font-semibold text-slate-900">
                       {rule.surcharge_rate}%
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3 text-center">
                       <span
                         className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                           rule.status === "ACTIVE"
-                            ? "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20"
-                            : "bg-slate-100 text-slate-600 ring-1 ring-inset ring-slate-500/20"
+                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            : "bg-slate-100 text-slate-600 border border-slate-200"
                         }`}
                       >
                         {rule.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 text-xs text-slate-500">
-                      {rule.effective_from ? rule.effective_from.split("T")[0] : "—"}
-                    </td>
-                    <td className="px-4 py-3.5 text-right">
-                      <div className="flex items-center justify-end gap-1">
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
+                          type="button"
                           onClick={() => handleToggleStatus(rule)}
-                          title={`Mark as ${rule.status === "ACTIVE" ? "INACTIVE" : "ACTIVE"}`}
-                          className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                          title={rule.status === "ACTIVE" ? "Deactivate" : "Activate"}
+                          className={`rounded p-1.5 transition ${
+                            rule.status === "ACTIVE"
+                              ? "text-emerald-600 hover:bg-emerald-50"
+                              : "text-slate-400 hover:bg-slate-100"
+                          }`}
                         >
-                          <Power className={`h-4 w-4 ${rule.status === "ACTIVE" ? "text-emerald-600" : "text-slate-400"}`} />
+                          <Power className="h-4 w-4" />
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleOpenEdit(rule)}
-                          title="Edit Rule"
-                          className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-purple-600"
+                          title="Edit"
+                          className="rounded p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
                         >
                           <Pencil className="h-4 w-4" />
                         </button>
                         <button
-                          onClick={() => handleDelete(rule)}
-                          title="Delete Rule"
-                          className="rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                          type="button"
+                          onClick={() => setConfirmDialog(rule)}
+                          title="Delete"
+                          className="rounded p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700 transition"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -435,73 +390,49 @@ const AdminSurchargeRules = () => {
         </div>
       </div>
 
-      {/* Add / Edit Modal */}
+      {/* Modal: Create / Edit Rule */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-          <div className="relative w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl transition-all">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-              <div className="flex items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-600 text-white">
-                  <Coins className="h-4 w-4" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">
-                    {editingRule ? "Edit Surcharge Rule" : "Add New Surcharge Rule"}
-                  </h3>
-                  <p className="text-xs text-slate-500">Configure wealth slab & percentage rate</p>
-                </div>
-              </div>
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+              <h2 className="text-lg font-semibold text-slate-900">
+                {editingRule ? "Edit Surcharge Rule" : "Create Surcharge Rule"}
+              </h2>
               <button
+                type="button"
                 onClick={() => setShowModal(false)}
-                className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Quick Presets for New Rules */}
-            {!editingRule && (
-              <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-3">
-                <span className="text-xs font-semibold text-slate-600">Quick Statutory Brackets:</span>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {PRESET_SURCHARGE_RULES.map((p, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => applyPreset(p)}
-                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 shadow-2xs transition hover:border-purple-300 hover:bg-purple-50 hover:text-purple-700"
-                    >
-                      {p.name} ({p.rate}%)
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-700">Assessment Year *</label>
+                  <label className="text-xs font-medium text-slate-700">
+                    Tax Year <span className="text-red-500">*</span>
+                  </label>
                   <select
                     value={form.tax_year}
                     onChange={(e) => setForm({ ...form, tax_year: e.target.value })}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
                     required
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-slate-400 focus:outline-none"
                   >
                     {taxYears.map((y) => (
                       <option key={y} value={y}>
-                        AY {y}
+                        {formatTaxYearLabel(y)}
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-700">Status</label>
+                  <label className="text-xs font-medium text-slate-700">Status</label>
                   <select
                     value={form.status}
                     onChange={(e) => setForm({ ...form, status: e.target.value })}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-slate-400 focus:outline-none"
                   >
                     <option value="ACTIVE">ACTIVE</option>
                     <option value="INACTIVE">INACTIVE</option>
@@ -510,50 +441,58 @@ const AdminSurchargeRules = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-700">Rule Name / Description *</label>
+                <label className="text-xs font-medium text-slate-700">
+                  Rule Name / Description <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   value={form.rule_name}
                   onChange={(e) => setForm({ ...form, rule_name: e.target.value })}
                   placeholder="e.g. Above BDT 4 crore to BDT 10 crore"
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
                   required
+                  className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-slate-400 focus:outline-none"
                 />
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-700">Minimum Wealth (BDT) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={form.minimum_wealth}
-                    onChange={(e) => setForm({ ...form, minimum_wealth: e.target.value })}
-                    placeholder="0"
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
-                    required
-                  />
-                  <p className="mt-1 text-[11px] text-slate-500">e.g. 40,000,000 for 4 Crore</p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-700">
-                    Maximum Wealth (BDT) <span className="text-slate-400">(Blank for Unlimited)</span>
+                  <label className="text-xs font-medium text-slate-700">
+                    Minimum Wealth (BDT) <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
+                    value={form.minimum_wealth}
+                    onChange={(e) => setForm({ ...form, minimum_wealth: e.target.value })}
+                    placeholder="0"
+                    required
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold focus:border-slate-400 focus:outline-none"
+                  />
+                  <p className="mt-1 text-[11px] text-slate-400">e.g. 40,000,000 (4 Crore)</p>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-slate-700">
+                    Maximum Wealth (BDT)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
                     value={form.maximum_wealth}
                     onChange={(e) => setForm({ ...form, maximum_wealth: e.target.value })}
-                    placeholder="Leave empty for unlimited top slab"
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    placeholder="Blank for unlimited"
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold focus:border-slate-400 focus:outline-none"
                   />
-                  <p className="mt-1 text-[11px] text-slate-500">e.g. 100,000,000 for 10 Crore</p>
+                  <p className="mt-1 text-[11px] text-slate-400">e.g. 100,000,000 (10 Crore)</p>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-700">Surcharge Rate (%) *</label>
+                <label className="text-xs font-medium text-slate-700">
+                  Surcharge Rate (%) <span className="text-red-500">*</span>
+                </label>
                 <div className="relative mt-1">
                   <input
                     type="number"
@@ -563,61 +502,49 @@ const AdminSurchargeRules = () => {
                     value={form.surcharge_rate}
                     onChange={(e) => setForm({ ...form, surcharge_rate: e.target.value })}
                     placeholder="10"
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 pr-8 text-sm text-slate-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
                     required
+                    className="h-9 w-full rounded-lg border border-slate-200 px-3 pr-8 text-sm font-semibold focus:border-slate-400 focus:outline-none"
                   />
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-400">%</span>
                 </div>
-                <p className="mt-1 text-[11px] text-slate-500">Calculated as a percentage of regular tax payable</p>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-700">Effective From</label>
+                  <label className="text-xs font-medium text-slate-700">Effective From</label>
                   <input
                     type="date"
                     value={form.effective_from}
                     onChange={(e) => setForm({ ...form, effective_from: e.target.value })}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-slate-400 focus:outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-700">
-                    Effective To <span className="text-slate-400">(Optional)</span>
-                  </label>
+                  <label className="text-xs font-medium text-slate-700">Effective To (Optional)</label>
                   <input
                     type="date"
                     value={form.effective_to}
                     onChange={(e) => setForm({ ...form, effective_to: e.target.value })}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-slate-400 focus:outline-none"
                   />
                 </div>
               </div>
 
-              <div className="mt-6 flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-50"
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-emerald-600/20 hover:bg-emerald-700 transition disabled:opacity-50"
                 >
-                  {saving ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      Saving...
-                    </>
-                  ) : editingRule ? (
-                    "Save Changes"
-                  ) : (
-                    "Create Surcharge Slab"
-                  )}
+                  {saving ? "Saving..." : editingRule ? "Update Rule" : "Create Surcharge Slab"}
                 </button>
               </div>
             </form>
@@ -625,34 +552,29 @@ const AdminSurchargeRules = () => {
         </div>
       )}
 
-      {/* Confirmation Dialog */}
+      {/* Delete Confirmation Modal */}
       {confirmDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600">
-                <AlertTriangle className="h-5 w-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900">{confirmDialog.title}</h3>
-                <p className="mt-1 text-sm text-slate-600">{confirmDialog.message}</p>
-              </div>
-            </div>
-
-            <div className="mt-6 flex items-center justify-end gap-3">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-xl text-center">
+            <Trash2 className="mx-auto h-10 w-10 text-red-500 mb-3" />
+            <h3 className="text-base font-semibold text-slate-900">Delete Surcharge Rule?</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Are you sure you want to delete rule <strong>{confirmDialog.rule_name}</strong> for {confirmDialog.tax_year}?
+            </p>
+            <div className="mt-5 flex justify-center gap-3">
               <button
                 type="button"
                 onClick={() => setConfirmDialog(null)}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={confirmDialog.onConfirm}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700"
+                onClick={() => handleDelete(confirmDialog)}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition"
               >
-                Confirm Delete
+                Delete
               </button>
             </div>
           </div>

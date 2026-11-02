@@ -1,9 +1,6 @@
 const express = require("express");
-
 const router = express.Router();
-
 const TaxRuleController = require("../controllers/taxRuleController");
-
 const verifyToken = require("../middleware/verifyToken");
 const verifyAdmin = require("../middleware/verifyAdmin");
 
@@ -12,79 +9,29 @@ router.get("/public/years", TaxRuleController.getPublicTaxYears);
 router.get("/public/all-years", TaxRuleController.getPublicAllYearsOverview);
 router.get("/public/year/:taxYear", TaxRuleController.getPublicYearOverview);
 
-// get available tax years
-// user + admin
-// get /api/tax-rules/years
+// User / Admin endpoints
+router.get("/years", verifyToken, TaxRuleController.getAvailableTaxYears);
 
-router.get(
-  "/years",
-  verifyToken,
-  TaxRuleController.getAvailableTaxYears
-);
+// Admin: single rule operations by ID (defined before generic :taxYear routes)
+router.get("/rule/:id", verifyToken, verifyAdmin, TaxRuleController.getTaxRuleById);
+router.get("/admin/:id", verifyToken, verifyAdmin, TaxRuleController.getTaxRuleById);
+router.patch("/rule/:id/status", verifyToken, verifyAdmin, TaxRuleController.toggleStatus);
+router.delete("/rule/:id", verifyToken, verifyAdmin, TaxRuleController.deleteTaxRule);
 
-// get all rules of a tax year
-// admin only
-// get /api/tax-rules/2028-29/all
+// Admin: tax year bulk operations
+router.get("/:taxYear/all", verifyToken, verifyAdmin, TaxRuleController.getAllTaxRules);
+router.get("/:taxYear/status", verifyToken, verifyAdmin, TaxRuleController.getTaxYearStatus);
+router.patch("/:taxYear/status", verifyToken, verifyAdmin, TaxRuleController.updateTaxYearStatus);
 
-router.get(
-  "/:taxYear/all",
-  verifyToken,
-  verifyAdmin,
-  TaxRuleController.getAllTaxRules
-);
+// Admin: create tax rule slab
+router.post("/", verifyToken, verifyAdmin, TaxRuleController.createTaxRule);
 
-// get tax year status
-// admin only
-// get /api/tax-rules/2028-29/status
+// User / Admin: get active rules of a tax year
+router.get("/:taxYear", verifyToken, TaxRuleController.getActiveTaxRules);
 
-router.get(
-  "/:taxYear/status",
-  verifyToken,
-  verifyAdmin,
-  TaxRuleController.getTaxYearStatus
-);
-
-// update tax year status
-// admin only
-// patch /api/tax-rules/2028-29/status
-
-router.patch(
-  "/:taxYear/status",
-  verifyToken,
-  verifyAdmin,
-  TaxRuleController.updateTaxYearStatus
-);
-
-// create tax rule
-// admin only
-// post /api/tax-rules
-
-router.post(
-  "/",
-  verifyToken,
-  verifyAdmin,
-  TaxRuleController.createTaxRule
-);
-
-// get active rules
-// user + admin
-// get /api/tax-rules/2028-29
-
-router.get(
-  "/:taxYear",
-  verifyToken,
-  TaxRuleController.getActiveTaxRules
-);
-
-// update single slab
-// admin only
-// put /api/tax-rules/:id
-
-router.put(
-  "/:id",
-  verifyToken,
-  verifyAdmin,
-  TaxRuleController.updateTaxRule
-);
+// Admin: update single slab
+router.put("/:id", verifyToken, verifyAdmin, TaxRuleController.updateTaxRule);
+router.patch("/:id/status", verifyToken, verifyAdmin, TaxRuleController.toggleStatus);
+router.delete("/:id", verifyToken, verifyAdmin, TaxRuleController.deleteTaxRule);
 
 module.exports = router;

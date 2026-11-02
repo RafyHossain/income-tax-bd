@@ -16,6 +16,11 @@ const taxThresholdRoutes = require("./routes/taxThresholdRoutes");
 const taxRebateRuleRoutes = require("./routes/taxRebateRuleRoutes");
 const surchargeRuleRoutes = require("./routes/surchargeRuleRoutes");
 const salaryExemptionRuleRoutes = require("./routes/salaryExemptionRuleRoutes");
+const taxYearRoutes = require("./routes/taxYearRoutes");
+const incomeExemptionRuleRoutes = require("./routes/incomeExemptionRuleRoutes");
+const taxReturnRoutes = require("./routes/taxReturnRoutes");
+const refundRoutes = require("./routes/refundRoutes");
+const taxCreditRoutes = require("./routes/taxCreditRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 
 const app = express();
@@ -55,7 +60,11 @@ app.use("/api/tax-thresholds", taxThresholdRoutes);
 app.use("/api/tax-rebate-rules", taxRebateRuleRoutes);
 app.use("/api/surcharge-rules", surchargeRuleRoutes);
 app.use("/api/salary-exemption-rules", salaryExemptionRuleRoutes);
+app.use("/api/tax-years", taxYearRoutes);
+app.use("/api/income-exemption-rules", incomeExemptionRuleRoutes);
+app.use("/api/tax-returns", taxReturnRoutes);
+app.use("/api/refunds", refundRoutes);
+app.use("/api/tax-credits", taxCreditRoutes);
 app.use("/api/admin", adminRoutes);
-
 
 module.exports = app;

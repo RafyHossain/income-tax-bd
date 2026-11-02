@@ -3,11 +3,11 @@ const TaxpayerProfileService = require("../services/taxpayerProfileService");
 const TaxpayerProfileController = {
   async createProfile(req, res) {
     try {
-      const userId = req.user.id; //get from usert login payload
+      const userId = req.user.id; // get from user login payload
 
       const result = await TaxpayerProfileService.createProfile(
         userId,
-        req.body,     //data from frontend
+        req.body // data from frontend
       );
 
       return res.status(201).json({
@@ -16,10 +16,19 @@ const TaxpayerProfileController = {
         data: result,
       });
     } catch (error) {
-      if (error.message === "Taxpayer profile already exists") {
+      if (
+        error.message === "Taxpayer profile already exists" ||
+        error.message === "This e-TIN number is already registered." ||
+        error.message.includes("already registered") ||
+        error.message.includes("already exists") ||
+        error.code === "ER_DUP_ENTRY" ||
+        error.errno === 1062
+      ) {
         return res.status(409).json({
           success: false,
-          message: error.message,
+          message: error.message.includes("e-TIN") || error.message.includes("tin_number")
+            ? "This e-TIN number is already registered."
+            : error.message,
         });
       }
 
@@ -27,7 +36,8 @@ const TaxpayerProfileController = {
         error.message.includes("required") ||
         error.message.includes("Invalid") ||
         error.message.includes("cannot be") ||
-        error.message.includes("must be")
+        error.message.includes("must be") ||
+        error.message.includes("12 digits")
       ) {
         return res.status(400).json({
           success: false,
@@ -77,7 +87,7 @@ const TaxpayerProfileController = {
 
       const result = await TaxpayerProfileService.updateProfile(
         userId,
-        req.body,
+        req.body
       );
 
       return res.status(200).json({
@@ -94,10 +104,26 @@ const TaxpayerProfileController = {
       }
 
       if (
+        error.message === "This e-TIN number is already registered." ||
+        error.message.includes("already registered") ||
+        error.message.includes("already exists") ||
+        error.code === "ER_DUP_ENTRY" ||
+        error.errno === 1062
+      ) {
+        return res.status(409).json({
+          success: false,
+          message: error.message.includes("e-TIN") || error.message.includes("tin_number")
+            ? "This e-TIN number is already registered."
+            : error.message,
+        });
+      }
+
+      if (
         error.message.includes("required") ||
         error.message.includes("Invalid") ||
         error.message.includes("cannot be") ||
-        error.message.includes("must be")
+        error.message.includes("must be") ||
+        error.message.includes("12 digits")
       ) {
         return res.status(400).json({
           success: false,

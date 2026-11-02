@@ -104,8 +104,18 @@ const TaxDeductionService = {
 
     const actualDeductionDate = new Date(normalizedDate);
 
-    if (actualDeductionDate < effectiveFrom) {
-      throw new Error("Deduction date is before the rule effective date.");
+    // Earning period (Income Year) validation:
+    // For Assessment Year YYYY-YY, investments must be made within the Income Year (July 1 of YYYY-1 to June 30 of YYYY).
+    const startYear = parseInt(normalizedTaxYear.split("-")[0], 10);
+    const incomeStartDate = new Date(`${startYear - 1}-07-01`);
+    const incomeEndDate = new Date(`${startYear}-06-30T23:59:59.999Z`);
+
+    if (actualDeductionDate < incomeStartDate) {
+      throw new Error(`Deduction date cannot be before Income Year start (${startYear - 1}-07-01).`);
+    }
+
+    if (actualDeductionDate > incomeEndDate) {
+      throw new Error(`Deduction date cannot be after Income Year end (${startYear}-06-30).`);
     }
 
     if (effectiveTo && actualDeductionDate > effectiveTo) {

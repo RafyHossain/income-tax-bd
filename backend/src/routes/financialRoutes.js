@@ -8,3 +8,4 @@ const verifyToken = require("../middleware/verifyToken");
 router.get("/summary", verifyToken, FinancialController.getFinancialSummary);
 
 module.exports = router;
+

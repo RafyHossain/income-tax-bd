@@ -7,7 +7,6 @@ import {
   X,
   Power,
   ShieldCheck,
-  Search,
   Trash2,
   Sliders,
   CheckCircle2,
@@ -15,6 +14,7 @@ import {
 import toast from "react-hot-toast";
 
 import AdminMinimumTaxRuleService from "@/services/adminMinimumTaxRuleService";
+import { formatTaxYearLabel } from "@/utils/taxYearUtils";
 
 const emptyForm = {
   tax_year: "2026-27",
@@ -49,12 +49,11 @@ const PRESET_CODES = {
 
 const AdminMinimumTaxRules = () => {
   const [rules, setRules] = useState([]);
-  const [taxYears, setTaxYears] = useState(["2026-27", "2025-26", "2024-25", "2023-24"]);
+  const [taxYears, setTaxYears] = useState([]);
 
   const [selectedTaxYear, setSelectedTaxYear] = useState("");
   const [selectedRuleType, setSelectedRuleType] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -88,7 +87,6 @@ const AdminMinimumTaxRules = () => {
       if (selectedTaxYear) filters.tax_year = selectedTaxYear;
       if (selectedRuleType) filters.rule_type = selectedRuleType;
       if (selectedStatus) filters.status = selectedStatus;
-      if (searchTerm.trim()) filters.search = searchTerm.trim();
 
       const res = await AdminMinimumTaxRuleService.getAllRules(filters);
       setRules(res?.data || []);
@@ -108,11 +106,6 @@ const AdminMinimumTaxRules = () => {
   useEffect(() => {
     loadRules();
   }, [selectedTaxYear, selectedRuleType, selectedStatus]);
-
-  const handleSearch = (e) => {
-    e.preventDefault();
-    loadRules();
-  };
 
   const handleOpenCreate = () => {
     setEditingRule(null);
@@ -248,15 +241,6 @@ const AdminMinimumTaxRules = () => {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={loadRules}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-900"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-          <button
-            type="button"
             onClick={handleOpenCreate}
             className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
           >
@@ -268,7 +252,7 @@ const AdminMinimumTaxRules = () => {
 
       {/* Filter Toolbar */}
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-3">
           <div>
             <label className="text-xs font-medium text-slate-600">Tax Year</label>
             <select
@@ -278,7 +262,7 @@ const AdminMinimumTaxRules = () => {
             >
               <option value="">All Tax Years</option>
               {taxYears.map((year) => (
-                <option key={year} value={year}>{year}</option>
+                <option key={year} value={year}>{formatTaxYearLabel(year)}</option>
               ))}
             </select>
           </div>
@@ -307,25 +291,6 @@ const AdminMinimumTaxRules = () => {
               <option value="ACTIVE">ACTIVE</option>
               <option value="INACTIVE">INACTIVE</option>
             </select>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-slate-600">Search</label>
-            <form onSubmit={handleSearch} className="mt-1 relative flex">
-              <input
-                type="text"
-                placeholder="Search code or name..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-              />
-              <button
-                type="submit"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <Search className="h-4 w-4" />
-              </button>
-            </form>
           </div>
         </div>
       </div>
@@ -455,15 +420,19 @@ const AdminMinimumTaxRules = () => {
                   <label className="text-xs font-medium text-slate-700">
                     Tax Year <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
+                  <select
                     name="tax_year"
                     value={form.tax_year}
                     onChange={handleFormChange}
-                    placeholder="e.g. 2026-27"
                     required
-                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-slate-400 focus:outline-none"
-                  />
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-slate-400 focus:outline-none"
+                  >
+                    {taxYears.map((year) => (
+                      <option key={year} value={year}>
+                        {formatTaxYearLabel(year)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>

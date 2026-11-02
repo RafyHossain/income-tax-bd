@@ -13,6 +13,13 @@ import {
 import toast from "react-hot-toast";
 
 import TaxDeductionService from "@/services/taxDeductionService";
+import {
+  COMMON_TAX_YEARS,
+  formatTaxYearLabel,
+  getEarningPeriodForAssessmentYear,
+  getAssessmentYearForDate,
+  formatFriendlyDateRange,
+} from "@/utils/taxYearUtils";
 
 // helpers
 
@@ -85,6 +92,11 @@ const TaxDeductions = () => {
     deduction_date: "",
   });
 
+  // Computed earning period for the currently selected tax year in form
+  const earningPeriod = useMemo(() => {
+    return getEarningPeriodForAssessmentYear(formData.tax_year);
+  }, [formData.tax_year]);
+
   // selected rule
 
   const selectedRule = useMemo(() => {
@@ -119,22 +131,24 @@ const TaxDeductions = () => {
         })
         .filter(Boolean);
 
-      setTaxYears(normalizedYears);
+      const mergedYears =
+        normalizedYears.length > 0
+          ? Array.from(new Set([...normalizedYears, ...COMMON_TAX_YEARS]))
+          : COMMON_TAX_YEARS;
+
+      setTaxYears(mergedYears);
 
       // select newest available year automatically
-      if (normalizedYears.length > 0 && !normalizedYears.includes(taxYear)) {
-        setTaxYear(normalizedYears[0]);
+      if (mergedYears.length > 0 && !mergedYears.includes(taxYear)) {
+        setTaxYear(mergedYears[0]);
       }
     } catch (error) {
       console.error("Get Investment Tax Years Error:", error);
 
-      setTaxYears([]);
-
-      toast.error(
-        error.response?.data?.message ||
-          error.message ||
-          "Failed to load tax years",
-      );
+      setTaxYears(COMMON_TAX_YEARS);
+      if (!taxYear) {
+        setTaxYear(COMMON_TAX_YEARS[0]);
+      }
     } finally {
       setYearsLoading(false);
     }
@@ -251,23 +265,45 @@ const TaxDeductions = () => {
   // open form
 
   const handleOpenForm = () => {
-    if (!taxYear) {
-      toast.error("Please select a tax year first.");
-
-      return;
-    }
+    const activeYear = taxYear || taxYears[0] || "2026-27";
+    const period = getEarningPeriodForAssessmentYear(activeYear);
 
     setEditingInvestmentId(null);
 
     setFormData({
-      tax_year: taxYear,
+      tax_year: activeYear,
       deduction_code: "",
       amount: "",
       description: "",
-      deduction_date: "",
+      deduction_date: period ? period.startDate : "",
     });
 
     setShowForm(true);
+  };
+
+  // tax year change inside form
+
+  const handleFormTaxYearChange = async (event) => {
+    const selectedYear = event.target.value;
+    const period = getEarningPeriodForAssessmentYear(selectedYear);
+
+    setFormData((prev) => {
+      let nextDate = prev.deduction_date;
+      if (
+        period &&
+        (!nextDate || nextDate < period.startDate || nextDate > period.endDate)
+      ) {
+        nextDate = period.startDate;
+      }
+      return {
+        ...prev,
+        tax_year: selectedYear,
+        deduction_code: "",
+        deduction_date: nextDate,
+      };
+    });
+
+    await fetchRules(selectedYear);
   };
 
   // edit investment
@@ -275,16 +311,25 @@ const TaxDeductions = () => {
   const handleEdit = (investment) => {
     setEditingInvestmentId(investment.id);
 
+    const formattedDate = investment.deduction_date
+      ? String(investment.deduction_date).slice(0, 10)
+      : "";
+
+    const itemYear =
+      investment.tax_year ||
+      getAssessmentYearForDate(formattedDate) ||
+      taxYear ||
+      taxYears[0];
+
     setFormData({
-      tax_year: investment.tax_year || taxYear,
+      tax_year: itemYear,
       deduction_code: investment.deduction_code || "",
       amount: investment.amount ?? "",
       description: investment.description || "",
-      deduction_date: investment.deduction_date
-        ? String(investment.deduction_date).slice(0, 10)
-        : "",
+      deduction_date: formattedDate,
     });
 
+    fetchRules(itemYear);
     setShowForm(true);
 
     window.scrollTo({
@@ -377,6 +422,19 @@ const TaxDeductions = () => {
       return;
     }
 
+    // Validate investment date falls within the selected tax year's earning period
+    if (earningPeriod) {
+      if (
+        formData.deduction_date < earningPeriod.startDate ||
+        formData.deduction_date > earningPeriod.endDate
+      ) {
+        toast.error(
+          `Investment date must be between ${earningPeriod.startDate} and ${earningPeriod.endDate} for AY ${formData.tax_year}`
+        );
+        return;
+      }
+    }
+
     // verify type exists for selected year
 
     const rule = rules.find(
@@ -416,7 +474,11 @@ const TaxDeductions = () => {
 
       handleCloseForm();
 
-      await fetchInvestments(taxYear);
+      if (taxYear !== formData.tax_year) {
+        setTaxYear(formData.tax_year);
+      } else {
+        await fetchInvestments(taxYear);
+      }
     } catch (error) {
       console.error("Add Investment Error:", error);
 
@@ -513,7 +575,7 @@ const TaxDeductions = () => {
 
                   {taxYears.map((year) => (
                     <option key={year} value={year}>
-                      {year}
+                      {formatTaxYearLabel(year)}
                     </option>
                   ))}
                 </>
@@ -573,12 +635,12 @@ const TaxDeductions = () => {
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <div>
                 <h2 className="text-base font-medium text-slate-900">
-                  Add Investment
+                  {editingInvestmentId ? "Edit Investment" : "Add Investment"}
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
                   Investment for tax year{" "}
-                  <span className="font-medium text-slate-700">{taxYear}</span>
+                  <span className="font-medium text-slate-700">{formData.tax_year}</span>
                 </p>
               </div>
 
@@ -597,15 +659,32 @@ const TaxDeductions = () => {
 
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-700">
-                    Tax Year
+                    Tax Year (Assessment Year)
+                    <span className="ml-1 text-red-500">*</span>
                   </label>
 
-                  <input
-                    type="text"
+                  <select
+                    name="tax_year"
                     value={formData.tax_year}
-                    readOnly
-                    className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none"
-                  />
+                    onChange={handleFormTaxYearChange}
+                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+                  >
+                    {taxYears.map((year) => (
+                      <option key={year} value={year}>
+                        {formatTaxYearLabel(year)}
+                      </option>
+                    ))}
+                  </select>
+
+                  {earningPeriod && (
+                    <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-500">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                      <span>
+                        Income Year: <strong className="text-slate-700">{earningPeriod.incomeYear}</strong> (Period:{" "}
+                        {formatFriendlyDateRange(earningPeriod.startDate, earningPeriod.endDate)})
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Investment Type */}
@@ -663,7 +742,7 @@ const TaxDeductions = () => {
                   </div>
                 </div>
 
-                {/* Date */}
+                {/* Date with calendar restrictions */}
 
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-700">
@@ -671,13 +750,29 @@ const TaxDeductions = () => {
                     <span className="ml-1 text-red-500">*</span>
                   </label>
 
-                  <input
-                    type="date"
-                    name="deduction_date"
-                    value={formData.deduction_date}
-                    onChange={handleChange}
-                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
-                  />
+                  <div className="relative">
+                    <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+
+                    <input
+                      type="date"
+                      name="deduction_date"
+                      min={earningPeriod?.startDate}
+                      max={earningPeriod?.endDate}
+                      value={formData.deduction_date}
+                      onChange={handleChange}
+                      required
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+                    />
+                  </div>
+
+                  {earningPeriod && (
+                    <p className="mt-1.5 text-xs text-slate-500">
+                      Calendar restricted to:{" "}
+                      <span className="font-medium text-emerald-700">
+                        {formatFriendlyDateRange(earningPeriod.startDate, earningPeriod.endDate)}
+                      </span>
+                    </p>
+                  )}
                 </div>
 
                 {/* Description */}

@@ -39,11 +39,16 @@ const LoginForm = () => {
         result.token
       );
 
-      await refreshUser();
+      const updatedUser = await refreshUser();
+      const role = (result?.user?.role || updatedUser?.role || "").toLowerCase();
 
       toast.success(result.message);
 
-      navigate(from, {
+      const targetPath =
+        location.state?.from?.pathname ||
+        (role === "admin" ? "/admin" : "/dashboard");
+
+      navigate(targetPath, {
         replace: true,
       });
     } catch (error) {

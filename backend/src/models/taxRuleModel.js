@@ -93,18 +93,17 @@ const TaxRuleModel = {
 
   async getAvailableTaxYears() {
     const sql = `
-      SELECT DISTINCT
-        tax_year
-      FROM tax_rules
-      WHERE tax_year IS NOT NULL
+      SELECT DISTINCT tax_year FROM (
+        SELECT tax_year FROM tax_years
+        UNION
+        SELECT tax_year FROM tax_rules WHERE tax_year IS NOT NULL
+      ) as all_years
       ORDER BY tax_year DESC
     `;
 
     const rows = await db.query(sql);
 
-    return rows.map(
-      (row) => row.tax_year,
-    );
+    return rows.map((row) => row.tax_year);
   },
 
   // get tax year status
@@ -230,6 +229,7 @@ const TaxRuleModel = {
         maximum_income = ?,
         tax_rate = ?,
         fixed_amount = ?,
+        status = COALESCE(?, status),
         effective_from = ?,
         effective_to = ?
       WHERE id = ?
@@ -241,6 +241,7 @@ const TaxRuleModel = {
       data.maximum_income,
       data.tax_rate,
       data.fixed_amount,
+      data.status || null,
       data.effective_from,
       data.effective_to,
       id,
@@ -274,6 +275,24 @@ const TaxRuleModel = {
         taxYear,
       ],
     );
+  },
+  // get single rule by id
+  async getRuleById(id) {
+    const sql = 'SELECT * FROM tax_rules WHERE id = ?';
+    const rows = await db.query(sql, [id]);
+    return rows[0] || null;
+  },
+
+  // toggle rule status
+  async toggleStatus(id, status) {
+    const sql = 'UPDATE tax_rules SET status = ? WHERE id = ?';
+    return await db.query(sql, [status, id]);
+  },
+
+  // delete tax rule
+  async deleteTaxRule(id) {
+    const sql = 'DELETE FROM tax_rules WHERE id = ?';
+    return await db.query(sql, [id]);
   },
 };
 

@@ -272,6 +272,37 @@ const TaxDeductionRuleController = {
       });
     }
   },
+  // delete deduction rule
+  async deleteDeductionRule(req, res) {
+    try {
+      const ruleId = Number(req.params.id);
+      if (!Number.isInteger(ruleId) || ruleId <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid deduction rule ID',
+        });
+      }
+      const result = await TaxDeductionRuleService.deleteDeductionRule(ruleId);
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+        action: result.action,
+        data: { id: result.id },
+      });
+    } catch (error) {
+      console.error('Delete Tax Deduction Rule Error:', error);
+      if (error.message === 'Tax deduction rule not found.') {
+        return res.status(404).json({
+          success: false,
+          message: error.message,
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  },
 };
 
 module.exports = TaxDeductionRuleController;

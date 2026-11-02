@@ -25,6 +25,7 @@ import {
 import TaxCalculationService from "@/services/taxCalculationService";
 import TaxpayerProfileService from "@/services/taxpayerProfileService";
 import SequentialTaxCalculationDetails from "@/components/tax/SequentialTaxCalculationDetails";
+import { formatTaxYearLabel } from "@/utils/taxYearUtils";
 
 // helpers
 
@@ -378,6 +379,13 @@ const TaxCalculation = () => {
     }
 
     return {
+      ...calculation,
+      id:
+        calculation.id ??
+        calculation.calculation_id ??
+        calculation.calculationId ??
+        null,
+
       taxYear:
         calculation.taxYear ??
         calculation.tax_year ??
@@ -554,11 +562,15 @@ const TaxCalculation = () => {
         (Number(calculation.tdsAmount ?? calculation.tds_amount ?? 0)) +
         (Number(calculation.advanceTaxAmount ?? calculation.advance_tax_amount ?? 0)),
 
-      finalPayable:
-        calculation.finalPayable ??
-        calculation.final_payable ??
-        (Number(calculation.totalTaxPayable ?? calculation.total_tax_payable ?? 0) -
-         (Number(calculation.tdsAmount ?? calculation.tds_amount ?? 0) + Number(calculation.advanceTaxAmount ?? calculation.advance_tax_amount ?? 0))),
+      finalPayable: Math.max(
+        0,
+        Number(
+          calculation.finalPayable ??
+          calculation.final_payable ??
+          (Number(calculation.totalTaxPayable ?? calculation.total_tax_payable ?? 0) -
+           (Number(calculation.tdsAmount ?? calculation.tds_amount ?? 0) + Number(calculation.advanceTaxAmount ?? calculation.advance_tax_amount ?? 0)))
+        )
+      ),
 
       details: Array.isArray(
         calculation.details,
@@ -691,7 +703,7 @@ const TaxCalculation = () => {
                   key={year}
                   value={year}
                 >
-                  {year}
+                  {formatTaxYearLabel(year)}
                 </option>
               ))}
             </select>

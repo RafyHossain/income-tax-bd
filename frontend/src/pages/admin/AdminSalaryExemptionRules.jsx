@@ -6,7 +6,6 @@ import {
   Pencil,
   X,
   Power,
-  Search,
   Trash2,
   Calendar,
   CheckCircle2,
@@ -16,6 +15,7 @@ import {
 import toast from "react-hot-toast";
 
 import AdminSalaryExemptionRuleService from "@/services/adminSalaryExemptionRuleService";
+import { formatTaxYearLabel } from "@/utils/taxYearUtils";
 
 const emptyForm = {
   tax_year: "2026-27",
@@ -39,12 +39,11 @@ const formatBDT = (amount) => {
 
 const AdminSalaryExemptionRules = () => {
   const [rules, setRules] = useState([]);
-  const [taxYears, setTaxYears] = useState(["2026-27", "2025-26", "2024-25", "2023-24"]);
+  const [taxYears, setTaxYears] = useState([]);
 
   const [selectedTaxYear, setSelectedTaxYear] = useState("");
   const [selectedCalculationType, setSelectedCalculationType] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -78,7 +77,6 @@ const AdminSalaryExemptionRules = () => {
       if (selectedTaxYear) filters.tax_year = selectedTaxYear;
       if (selectedCalculationType) filters.calculation_type = selectedCalculationType;
       if (selectedStatus) filters.status = selectedStatus;
-      if (searchTerm.trim()) filters.search = searchTerm.trim();
 
       const res = await AdminSalaryExemptionRuleService.getAllRules(filters);
       setRules(res?.data || []);
@@ -98,11 +96,6 @@ const AdminSalaryExemptionRules = () => {
   useEffect(() => {
     loadRules();
   }, [selectedTaxYear, selectedCalculationType, selectedStatus]);
-
-  const handleSearch = (e) => {
-    e.preventDefault();
-    loadRules();
-  };
 
   const handleOpenCreate = () => {
     setEditingItem(null);
@@ -220,22 +213,10 @@ const AdminSalaryExemptionRules = () => {
             <h1 className="text-2xl font-bold tracking-tight text-slate-900">
               Salary Exemption Rules
             </h1>
-            <p className="text-xs text-slate-500">
-              Database-driven statutory salary exemption limits and exemption caps per assessment year
-            </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={loadRules}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-900"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
           <button
             type="button"
             onClick={handleOpenCreate}
@@ -247,35 +228,9 @@ const AdminSalaryExemptionRules = () => {
         </div>
       </div>
 
-      {/* Overview Stat Cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-medium text-slate-500">Total Configured Rules</p>
-          <p className="mt-1 text-2xl font-bold text-slate-900">{totalRulesCount}</p>
-          <p className="mt-0.5 text-xs text-slate-400">Across all assessment years</p>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-medium text-slate-500">Active Rules</p>
-          <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-slate-900">{activeRulesCount}</span>
-            <span className="text-xs font-medium text-emerald-600">Active in Engine</span>
-          </div>
-          <p className="mt-0.5 text-xs text-slate-400">Used during live tax calculations</p>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-medium text-slate-500">Latest Active Ceiling</p>
-          <p className="mt-1 text-2xl font-bold text-slate-900">
-            {currentActiveRule ? formatBDT(currentActiveRule.max_exemption_amount) : "BDT 500,000.00"}
-          </p>
-          <p className="mt-0.5 text-xs text-slate-400">
-            {currentActiveRule ? `${currentActiveRule.tax_year} (1/3 of salary income)` : "Statutory default"}
-          </p>
-        </div>
-      </div>
-
       {/* Filter Toolbar */}
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-3">
           <div>
             <label className="text-xs font-medium text-slate-600">Tax Year</label>
             <select
@@ -286,7 +241,7 @@ const AdminSalaryExemptionRules = () => {
               <option value="">All Assessment Years</option>
               {taxYears.map((yr) => (
                 <option key={yr} value={yr}>
-                  {yr}
+                  {formatTaxYearLabel(yr)}
                 </option>
               ))}
             </select>
@@ -316,20 +271,6 @@ const AdminSalaryExemptionRules = () => {
               <option value="ACTIVE">Active</option>
               <option value="INACTIVE">Inactive</option>
             </select>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-slate-600">Search</label>
-            <form onSubmit={handleSearch} className="relative mt-1">
-              <input
-                type="text"
-                placeholder="Search year or description..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="h-9 w-full rounded-lg border border-slate-200 pl-8 pr-3 text-sm text-slate-700 focus:border-slate-400 focus:outline-none"
-              />
-              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-            </form>
           </div>
         </div>
       </div>
@@ -488,15 +429,19 @@ const AdminSalaryExemptionRules = () => {
                   <label className="text-xs font-medium text-slate-700">
                     Tax Year <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
+                  <select
                     name="tax_year"
                     value={form.tax_year}
                     onChange={handleFormChange}
-                    placeholder="e.g. 2026-27"
                     required
-                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-                  />
+                    className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
+                  >
+                    {taxYears.map((yr) => (
+                      <option key={yr} value={yr}>
+                        {formatTaxYearLabel(yr)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>

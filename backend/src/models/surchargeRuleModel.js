@@ -56,9 +56,11 @@ const SurchargeRuleModel = {
   // get available tax years
   async getAvailableTaxYears() {
     const sql = `
-      SELECT DISTINCT tax_year
-      FROM surcharge_rules
-      WHERE tax_year IS NOT NULL
+      SELECT DISTINCT tax_year FROM (
+        SELECT tax_year FROM tax_years
+        UNION
+        SELECT tax_year FROM surcharge_rules WHERE tax_year IS NOT NULL
+      ) as all_years
       ORDER BY tax_year DESC
     `;
     const rows = await db.query(sql);
